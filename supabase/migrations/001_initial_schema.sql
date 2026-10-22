@@ -622,7 +622,7 @@ values
    'Pedro García (hijo)', '+34 622 333 444', 'Control glucémico antes de comidas.',
    '00000000-0000-4000-8000-000000000002'),
   ('00000000-0000-4000-8000-000000000103', 'Pilar', 'Sánchez Romero', date '1941-02-08', 'femenino', '205-A', date '2024-01-20', 'activo',
-   array[], array['Osteoporosis', 'Úlcera por presión sacra grado II'],
+   '{}', array['Osteoporosis', 'Úlcera por presión sacra grado II'],
    'Ana Sánchez (nieta)', '+34 633 444 555', 'Cambios posturales cada 2 horas imprescindibles.',
    '00000000-0000-4000-8000-000000000002'),
   ('00000000-0000-4000-8000-000000000104', 'Manuel', 'Díaz Torres', date '1936-07-22', 'masculino', '206-B', date '2021-06-10', 'ingresado',
