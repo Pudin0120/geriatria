@@ -477,6 +477,18 @@ export function isResidentStatus(value: unknown): value is ResidentStatus {
   return typeof value === 'string' && (RESIDENT_STATUS_VALUES as readonly string[]).includes(value)
 }
 
+const RESIDENT_GENDER_VALUES = ['masculino', 'femenino', 'otro'] as const satisfies readonly ResidentGender[]
+
+export function isResidentGender(value: unknown): value is ResidentGender {
+  return typeof value === 'string' && (RESIDENT_GENDER_VALUES as readonly string[]).includes(value)
+}
+
+const FRAILTY_LEVEL_VALUES = ['fragil', 'pre_fragil', 'robusto'] as const satisfies readonly FrailtyLevel[]
+
+export function isFrailtyLevel(value: unknown): value is FrailtyLevel {
+  return typeof value === 'string' && (FRAILTY_LEVEL_VALUES as readonly string[]).includes(value)
+}
+
 export function isDayOfWeek(value: unknown): value is DayOfWeek {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 7
 }
