@@ -1,27 +1,39 @@
-import type { InputHTMLAttributes } from 'react'
+import type { InputHTMLAttributes, ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
-  label: string
+  /** Etiqueta visible. Si se omite, use `aria-label` en el propio input. */
+  label?: string
   /** Mensaje de error mostrado bajo el campo (en español). */
   error?: string
   /** Identificador único enlazado con la etiqueta. */
   id: string
 }
 
+/** Etiqueta accesible reutilizable (para campos propios que no usan <Input>). */
+export function Label({ htmlFor, children, className }: { htmlFor?: string; children: ReactNode; className?: string }) {
+  return (
+    <label htmlFor={htmlFor} className={cn('block text-sm font-medium text-slate-700', className)}>
+      {children}
+    </label>
+  )
+}
+
 /** Campo de texto con etiqueta accesible y mensaje de error. */
 export function Input({ label, id, error, className, ...resto }: InputProps) {
   return (
     <div className="space-y-1.5">
-      <label
-        htmlFor={id}
-        className="block text-sm font-medium text-slate-700"
-      >
-        {label}
-      </label>
+      {label ? (
+        <label
+          htmlFor={id}
+          className="block text-sm font-medium text-slate-700"
+        >
+          {label}
+        </label>
+      ) : null}
       <input
         id={id}
-        name={id}
+        name={resto.name ?? id}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? `${id}-error` : undefined}
         className={cn(

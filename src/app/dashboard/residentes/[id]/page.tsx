@@ -64,6 +64,28 @@ export default async function ResidenteDetallePage({ params }: ResidenteDetalleP
         ) : null}
       </header>
 
+      {/* Accesos rápidos del ciclo clínico (Fase 4) */}
+      <nav aria-label="Secciones del residente" className="flex flex-wrap gap-2">
+        <Link
+          href={`/dashboard/residentes/${id}/planes`}
+          className="rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:border-teal-400 hover:bg-teal-50 hover:text-teal-800"
+        >
+          📋 Planes de cuidado
+        </Link>
+        <Link
+          href={`/dashboard/residentes/${id}/medicaciones`}
+          className="rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:border-teal-400 hover:bg-teal-50 hover:text-teal-800"
+        >
+          💊 Medicaciones
+        </Link>
+        <Link
+          href="/dashboard/tareas"
+          className="rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:border-teal-400 hover:bg-teal-50 hover:text-teal-800"
+        >
+          ✅ Tareas del día
+        </Link>
+      </nav>
+
       <Suspense fallback={<SkeletonTable filas={6} />}>
         <ContenidoDetalle id={id} />
       </Suspense>

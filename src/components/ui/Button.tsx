@@ -91,11 +91,14 @@ export function SubmitButton({
   variant = 'primary',
   size = 'md',
   className,
+  disabled = false,
 }: {
   children: ReactNode
   variant?: ButtonVariant
   size?: ButtonSize
   className?: string
+  /** Deshabilita el botón además del estado pendiente del formulario. */
+  disabled?: boolean
 }) {
   const { pending } = useFormStatus()
   return (
@@ -103,7 +106,7 @@ export function SubmitButton({
       type="submit"
       variant={variant}
       size={size}
-      pending={pending}
+      pending={pending || disabled}
       className={className}
     >
       {children}

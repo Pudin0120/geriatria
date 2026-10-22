@@ -12,12 +12,19 @@ function enlacesPorRol(rol: UserRole): SidebarLinkDef[] {
   const comunes: SidebarLinkDef[] = [
     { href: '/dashboard', label: 'Resumen', icon: Icons.dashboard },
     { href: '/dashboard/residentes', label: 'Residentes', icon: Icons.residents },
-    { href: '/dashboard/tareas', label: 'Tareas de cuidado', icon: Icons.tasks },
-    { href: '/dashboard/medicacion', label: 'Medicación', icon: Icons.medications },
+    // «Tareas del Día»: accesible para todos los roles clínicos (Fase 4).
+    { href: '/dashboard/tareas', label: 'Tareas del día', icon: Icons.tasks },
+  ]
+
+  // «Administración de Medicamentos» (DURO): enfermería, auxiliares y admin.
+  const administracionMedicacion: SidebarLinkDef[] = [
+    { href: '/dashboard/medicaciones/administrar', label: 'Administrar medicamentos', icon: Icons.medications },
   ]
 
   const clinicos: SidebarLinkDef[] = [
-    { href: '/dashboard/planes', label: 'Planes de cuidado', icon: Icons.plans },
+    // Los planes y medicaciones por residente se gestionan desde su ficha;
+    // este acceso directo lleva a la agenda global como punto de partida.
+    { href: '/dashboard/residentes?ver=planes', label: 'Planes de cuidado', icon: Icons.plans },
   ]
 
   const administrativos: SidebarLinkDef[] = [
@@ -26,12 +33,12 @@ function enlacesPorRol(rol: UserRole): SidebarLinkDef[] {
 
   switch (rol) {
     case 'admin':
-      return [...comunes, ...clinicos, ...administrativos]
+      return [...comunes, ...administracionMedicacion, ...clinicos, ...administrativos]
     case 'nurse_jefe':
     case 'medico':
-      return [...comunes, ...clinicos]
+      return [...comunes, ...administracionMedicacion, ...clinicos]
     case 'auxiliar':
-      return comunes
+      return [...comunes, ...administracionMedicacion]
   }
 }
 
