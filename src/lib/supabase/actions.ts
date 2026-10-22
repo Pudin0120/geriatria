@@ -37,6 +37,30 @@ const ERROR_INTERNO =
 const USUARIO_EXISTE =
   'Ya existe una cuenta registrada con ese correo electrónico.'
 
+/**
+ * Diagnóstico temprano: si faltan las variables de entorno de Supabase,
+ * las Server Actions fallarían con un mensaje genérico. Aquí se detecta
+ * y se informa con precisión (sin exponer valores ni claves).
+ */
+function validarConfiguracionSupabase(): string | null {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  if (!url || !anonKey) {
+    return (
+      'Falta la configuración de Supabase en este entorno. ' +
+      'Define NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY en .env.local ' +
+      '(o en los Secrets de Vercel) y REINICIA el servidor / vuelve a desplegar.'
+    )
+  }
+  try {
+    new URL(url)
+  } catch {
+    return 'NEXT_PUBLIC_SUPABASE_URL no tiene un formato válido (debe ser https://xxxx.supabase.co).'
+  }
+  return null
+}
+
 /** Normaliza errores de Supabase Auth a mensajes comprensibles en español. */
 function mensajeErrorAuth(descripcion: string): string {
   const texto = descripcion.toLowerCase()
@@ -49,6 +73,17 @@ function mensajeErrorAuth(descripcion: string): string {
   }
   if (texto.includes('rate limit') || texto.includes('too many requests')) {
     return 'Demasiados intentos. Espera unos minutos antes de reintentar.'
+  }
+  if (texto.includes('password should be at least')) {
+    return PASSWORD_CORTA
+  }
+  // Error de red o fetch fallido contra la API de Supabase.
+  if (
+    texto.includes('fetcherror') ||
+    texto.includes('failed to fetch') ||
+    texto.includes('network')
+  ) {
+    return 'No se pudo conectar con Supabase. Revisa tu conexión y que la URL del proyecto sea correcta.'
   }
   return descripcion || ERROR_INTERNO
 }
@@ -78,6 +113,11 @@ export async function login(
   }
   if (password.length < 8) {
     return { error: PASSWORD_CORTA }
+  }
+
+  const problemaConfig = validarConfiguracionSupabase()
+  if (problemaConfig) {
+    return { error: problemaConfig }
   }
 
   const supabase = await createClient()
@@ -120,6 +160,11 @@ export async function signup(
   }
   if (password.length < 8) {
     return { error: PASSWORD_CORTA, exito: false }
+  }
+
+  const problemaConfig = validarConfiguracionSupabase()
+  if (problemaConfig) {
+    return { error: problemaConfig, exito: false }
   }
 
   const supabase = await createClient()
