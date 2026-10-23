@@ -25,19 +25,30 @@ import type {
   VitalSignsRecord,
 } from '@/types'
 import { isExecutionOutcome, isFrailtyLevel, isResidentGender, isResidentStatus } from '@/types'
+// Los tipos de estado y los rangos VGI viven en módulos propios porque un
+// archivo 'use server' solo puede exportar funciones async (requisito de
+// Next.js; incumplirlo rompe la compilación del proyecto). Se re-exportan
+// como tipos para no romper los imports existentes.
+import type {
+  ClinicalFormState,
+  LoginState,
+  ResidentFormState,
+  SignupState,
+  VgiFormState,
+} from '@/lib/estados-form'
+import { RANGOS_VGI, type CampoVgi } from '@/lib/vgi-rangos'
+
+export type {
+  ClinicalFormState,
+  LoginState,
+  ResidentFormState,
+  SignupState,
+  VgiFormState,
+} from '@/lib/estados-form'
 
 /* ================================================================== */
 /* Tipos de estado de formulario (sin `any`)                           */
 /* ================================================================== */
-
-export interface LoginState {
-  error: string | null
-}
-
-export interface SignupState {
-  error: string | null
-  exito: boolean
-}
 
 const EMAIL_INVALIDO = 'Introduce un correo electrónico válido.'
 const PASSWORD_CORTA = 'La contraseña debe tener al menos 8 caracteres.'
@@ -203,20 +214,8 @@ export async function signup(
 
 /* ================================================================== */
 /* Tipos de estado para formularios de residentes y VGI               */
+/* (declarados en @/lib/estados-form, re-exportados arriba)           */
 /* ================================================================== */
-
-export interface ResidentFormState {
-  error: string | null
-  exito: boolean
-  /** Errores por campo (id del input → mensaje en español). */
-  campos: Record<string, string>
-}
-
-export interface VgiFormState {
-  error: string | null
-  exito: boolean
-  campos: Record<string, string>
-}
 
 const ESTADO_INICIAL_FORM: ResidentFormState = {
   error: null,
@@ -420,19 +419,9 @@ export async function updateResident(
 
 /* ================================================================== */
 /* Server Actions de valoraciones geriátricas integrales (VGI)         */
+/* RANGOS_VGI vive en @/lib/vgi-rangos (módulo 'use server' solo      */
+/* puede exportar funciones async).                                   */
 /* ================================================================== */
-
-/** Rangos clínicos validados ANTES de escribir en la BD (coinciden con los CHECK de la Fase 1). */
-export const RANGOS_VGI = {
-  barthel_index: { min: 0, max: 100, etiqueta: 'Índice de Barthel' },
-  mmse_score: { min: 0, max: 30, etiqueta: 'MMSE (Mini-Mental)' },
-  mna_sf_score: { min: 0, max: 14, etiqueta: 'MNA-SF (Nutrición)' },
-  downton_score: { min: 0, max: 3, etiqueta: 'Downton (Caídas)' },
-  yesavage_score: { min: 0, max: 15, etiqueta: 'Yesavage (Ánimo)' },
-  charlson_score: { min: 0, max: 37, etiqueta: 'Charlson (Comorbilidad)' },
-} as const satisfies Readonly<Record<string, { min: number; max: number; etiqueta: string }>>
-
-type CampoVgi = keyof typeof RANGOS_VGI
 
 /** Normaliza errores conocidos de la BD a mensajes en español. */
 function normalizarErrorBd(mensaje: string): string {
@@ -588,15 +577,8 @@ export async function createVgiAssessment(
 
 /* ================================================================== */
 /* Server Actions de la Fase 4: planes, tareas y medicaciones          */
+/* ClinicalFormState vive en @/lib/estados-form (re-exportado arriba). */
 /* ================================================================== */
-
-/** Estado compartido por los formularios y modales de la Fase 4. */
-export interface ClinicalFormState {
-  error: string | null
-  exito: boolean
-  /** Errores por campo (id del input → mensaje en español). */
-  campos: Record<string, string>
-}
 
 const ESTADO_CLINICO_INICIAL: ClinicalFormState = {
   error: null,

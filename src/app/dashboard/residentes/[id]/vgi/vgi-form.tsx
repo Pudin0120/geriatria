@@ -2,7 +2,8 @@
 
 import { useActionState } from 'react'
 import Link from 'next/link'
-import { createVgiAssessment, RANGOS_VGI, type VgiFormState } from '@/lib/supabase/actions'
+import { createVgiAssessment, type VgiFormState } from '@/lib/supabase/actions'
+import { RANGOS_VGI } from '@/lib/vgi-rangos'
 import { ScaleInput } from '@/components/ui/ScaleInput'
 import { Button, SubmitButton } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
