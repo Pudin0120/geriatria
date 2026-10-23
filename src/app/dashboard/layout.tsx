@@ -2,6 +2,9 @@ import { redirect } from 'next/navigation'
 import type { ReactNode } from 'react'
 import { Suspense } from 'react'
 import { obtenerSesionActiva } from '@/lib/supabase/session'
+import { getClinicalAlerts } from '@/lib/supabase/actions'
+import type { AlertSummary } from '@/lib/reportes'
+import { AlertBanner } from '@/components/ui/AlertBanner'
 import { DashboardShell } from '@/components/dashboard/DashboardShell'
 import { Icons, type SidebarLinkDef } from '@/components/ui/SidebarLink'
 import { SkeletonStats, SkeletonTable } from '@/components/ui/Skeleton'
@@ -25,6 +28,8 @@ function enlacesPorRol(rol: UserRole): SidebarLinkDef[] {
     // Los planes y medicaciones por residente se gestionan desde su ficha;
     // este acceso directo lleva a la agenda global como punto de partida.
     { href: '/dashboard/residentes?ver=planes', label: 'Planes de cuidado', icon: Icons.plans },
+    // Reportes y analíticas del centro (Fase 5): accesible para roles clínicos.
+    { href: '/dashboard/reportes', label: 'Reportes', icon: Icons.dashboard },
   ]
 
   const administrativos: SidebarLinkDef[] = [
@@ -65,9 +70,24 @@ async function ShellDashboard({ children }: { children: ReactNode }) {
 
   return (
     <DashboardShell rol={sesion.rol} nombre={nombre} enlaces={enlacesPorRol(sesion.rol)}>
+      {/* AlertBanner: alertas clínicas del turno (Fase 5), visibles para
+          todos los roles y calculadas en servidor al cargar la página. */}
+      <AlertasTurno />
       {children}
     </DashboardShell>
   )
+}
+
+/** Envoltorio de servidor para las alertas: se resuelve con streaming bajo Suspense. */
+async function AlertasTurno() {
+  let resumen: AlertSummary | null = null
+  try {
+    resumen = await getClinicalAlerts()
+  } catch {
+    // Sin alertas disponibles: el banner simplemente no se muestra.
+  }
+  if (!resumen || resumen.alerts.length === 0) return null
+  return <AlertBanner resumen={resumen} />
 }
 
 /** Esqueleto mostrado mientras el contenido dinámico se resuelve en streaming. */

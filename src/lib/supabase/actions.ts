@@ -4,7 +4,12 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { obtenerSesionActiva } from '@/lib/supabase/session'
-import { fechaLocalISO } from '@/lib/utils'
+import {
+  fechaLocalISO,
+  nombreResidente,
+  tareaProgramadaParaElDia,
+  timestampDeFechaYHora,
+} from '@/lib/utils'
 import type {
   AdministrationOutcome,
   CareTaskRow,
@@ -1290,4 +1295,678 @@ export async function toggleMedicationActive(
   revalidatePath(`/dashboard/residentes/${medicamento.resident_id}/medicaciones`)
   revalidatePath('/dashboard/medicaciones/administrar')
   return { ...ESTADO_CLINICO_INICIAL, exito: true }
+}
+
+/* ================================================================== */
+/* Fase 5 · Acciones de reportes, estadísticas y auditoría             */
+/* ================================================================== */
+
+import type {
+  AlertSummary,
+  AuditFilters,
+  AuditPage,
+  ClinicalAlert,
+  DashboardMetrics,
+  DistribucionEstado,
+  ResidenteRiesgo,
+  ResidentStats,
+} from '@/lib/reportes'
+import { detectarAnomaliasSignos } from '@/lib/reportes'
+import type {
+  AccessLogRow,
+  MedicationAdministrationRow,
+  ProfileRow,
+  ResidentRow,
+  TaskExecutionRow,
+  VgiAssessmentRow,
+} from '@/types'
+import { FRAILTY_LEVEL_LABELS, RESIDENT_STATUS_LABELS } from '@/types'
+
+/** Ventana por defecto para el cálculo de adherencia (días). */
+const DIAS_ADHERENCIA = 30
+
+/** Diferencia en días naturales entre dos fechas ISO (b - a). */
+function diasEntre(isoA: string, isoB: string): number {
+  const a = new Date(`${isoA.slice(0, 10)}T00:00:00`)
+  const b = new Date(`${isoB.slice(0, 10)}T00:00:00`)
+  return Math.round((b.getTime() - a.getTime()) / 86_400_000)
+}
+
+/** Porcentaje redondeado a un decimal; null si el total es cero. */
+function pct(parte: number, total: number): number | null {
+  if (total <= 0) return null
+  return Math.round((parte / total) * 1000) / 10
+}
+
+/** UUID canónico (evita valores maliciosos en filtros de PostgREST). */
+function esUuidFase5(valor: string): boolean {
+  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(valor)
+}
+
+/**
+ * KPIs globales del centro: residentes activos, ocupación por habitación,
+ * tareas completadas vs pendientes del día y medicaciones administradas hoy.
+ *
+ * Rendimiento: proyecciones mínimas, conteos agregados y lotes `in(...)`
+ * (sin N+1). Se apoya en los índices `idx_residents_status`,
+ * `idx_care_tasks_agenda`, `idx_task_executions_executed` e
+ * `idx_med_admin_executed` (migración 003_fase5_report_indexes.sql).
+ */
+export async function getDashboardMetrics(): Promise<DashboardMetrics> {
+  const sesion = await obtenerSesionActiva()
+  if (!sesion) redirect('/login')
+
+  const supabase = await createClient()
+  const hoy = fechaLocalISO()
+  const inicioDia = `${hoy}T00:00:00`
+  const finDia = timestampDeFechaYHora(hoy, '23:59:59')
+
+  /* 1) Residentes visibles (proyección mínima; alimenta ocupación y distribuciones). */
+  const { data: residentes, error: errResidentes } = await supabase
+    .from('residents')
+    .select('id, status, room_number')
+    .returns<Pick<ResidentRow, 'id' | 'status' | 'room_number'>[]>()
+  if (errResidentes) throw new Error(normalizarErrorBd(errResidentes.message))
+  const listaResidentes = residentes ?? []
+
+  const residentesActivos = listaResidentes.filter((r) => r.status === 'activo').length
+  const ocupacionPct = pct(residentesActivos, listaResidentes.length)
+
+  const mapaHabitaciones = new Map<string, number>()
+  for (const r of listaResidentes) {
+    if (r.status !== 'activo' || !r.room_number) continue
+    mapaHabitaciones.set(r.room_number, (mapaHabitaciones.get(r.room_number) ?? 0) + 1)
+  }
+  const distribucionHabitaciones = [...mapaHabitaciones.entries()]
+    .map(([habitacion, count]) => ({ habitacion, residentes: count }))
+    .sort((a, b) => b.residentes - a.residentes || a.habitacion.localeCompare(b.habitacion, 'es'))
+    .slice(0, 12)
+
+  const mapaEstados = new Map<string, number>()
+  for (const r of listaResidentes) {
+    mapaEstados.set(r.status, (mapaEstados.get(r.status) ?? 0) + 1)
+  }
+  const distribucionEstados: DistribucionEstado[] = (
+    Object.keys(RESIDENT_STATUS_LABELS) as (keyof typeof RESIDENT_STATUS_LABELS)[]
+  )
+    .filter((estado) => mapaEstados.has(estado))
+    .map((estado) => ({
+      estado,
+      etiqueta: RESIDENT_STATUS_LABELS[estado],
+      cantidad: mapaEstados.get(estado) ?? 0,
+    }))
+
+  /* 2) Última fragilidad registrada por residente (lote único ordenado por fecha desc). */
+  const { data: vgisRecientes, error: errVgi } = await supabase
+    .from('vgi_assessments')
+    .select('resident_id, frailty_level, assessment_date')
+    .not('frailty_level', 'is', null)
+    .order('assessment_date', { ascending: false })
+    .limit(3000)
+    .returns<Pick<VgiAssessmentRow, 'resident_id' | 'frailty_level' | 'assessment_date'>[]>()
+  if (errVgi) throw new Error(normalizarErrorBd(errVgi.message))
+  const ultimaFragilidad = new Map<string, FrailtyLevel>()
+  for (const v of vgisRecientes ?? []) {
+    if (v.frailty_level && !ultimaFragilidad.has(v.resident_id)) {
+      ultimaFragilidad.set(v.resident_id, v.frailty_level)
+    }
+  }
+  const mapaFragilidad = new Map<FrailtyLevel, number>()
+  for (const nivel of ultimaFragilidad.values()) {
+    mapaFragilidad.set(nivel, (mapaFragilidad.get(nivel) ?? 0) + 1)
+  }
+  const distribucionFragilidad = (
+    Object.keys(FRAILTY_LEVEL_LABELS) as (keyof typeof FRAILTY_LEVEL_LABELS)[]
+  )
+    .filter((nivel) => mapaFragilidad.has(nivel))
+    .map((nivel) => ({ nivel, etiqueta: FRAILTY_LEVEL_LABELS[nivel], cantidad: mapaFragilidad.get(nivel) ?? 0 }))
+
+  /* 3) Tareas pendientes hoy (days_of_week se filtra en memoria). */
+  const { data: tareasHoy, error: errTareas } = await supabase
+    .from('care_tasks')
+    .select('*')
+    .in('status', ['programada', 'en_curso'])
+    .lte('effective_from', hoy)
+    .or(`effective_until.is.null,effective_until.gte.${hoy}`)
+    .returns<CareTaskRow[]>()
+  if (errTareas) throw new Error(normalizarErrorBd(errTareas.message))
+  const tareasProgramadasHoy = (tareasHoy ?? []).filter((t) => tareaProgramadaParaElDia(t, hoy)).length
+
+  /* 4) Bitácora de ejecuciones de hoy. */
+  const { data: ejecucionesHoy, error: errEjec } = await supabase
+    .from('task_executions')
+    .select('outcome')
+    .gte('executed_at', inicioDia)
+    .lte('executed_at', finDia)
+    .returns<Pick<TaskExecutionRow, 'outcome'>[]>()
+  if (errEjec) throw new Error(normalizarErrorBd(errEjec.message))
+  const listaEjecuciones = ejecucionesHoy ?? []
+  const completadasHoy = listaEjecuciones.filter((e) => e.outcome === 'completada').length
+  const noRealizadasHoy = listaEjecuciones.filter((e) => e.outcome !== 'completada').length
+
+  /* 5) Medicaciones activas vigentes → tomas teóricas de hoy. */
+  const { data: medicaciones, error: errMeds } = await supabase
+    .from('medications')
+    .select('schedule_times')
+    .eq('active', true)
+    .lte('start_date', hoy)
+    .or(`end_date.is.null,end_date.gte.${hoy}`)
+    .returns<Pick<MedicationRow, 'schedule_times'>[]>()
+  if (errMeds) throw new Error(normalizarErrorBd(errMeds.message))
+  const tomasMedicacionHoy = (medicaciones ?? []).reduce(
+    (acc, m) => acc + m.schedule_times.filter((t) => /^\d{2}:\d{2}(:\d{2})?$/.test(t)).length,
+    0,
+  )
+
+  /* 6) DURO registrado hoy. */
+  const { data: adminsHoy, error: errAdmin } = await supabase
+    .from('medication_administrations')
+    .select('outcome, adverse_reaction')
+    .gte('administered_at', inicioDia)
+    .lte('administered_at', finDia)
+    .returns<Pick<MedicationAdministrationRow, 'outcome' | 'adverse_reaction'>[]>()
+  if (errAdmin) throw new Error(normalizarErrorBd(errAdmin.message))
+  const listaAdmins = adminsHoy ?? []
+  const administradasHoy = listaAdmins.filter((a) => a.outcome === 'administrada' || a.outcome === 'parcial').length
+  const reaccionesAdversasHoy = listaAdmins.filter((a) => a.adverse_reaction).length
+
+  return {
+    fecha: hoy,
+    totalResidentes: listaResidentes.length,
+    residentesActivos,
+    ocupacionPct,
+    distribucionHabitaciones,
+    distribucionEstados,
+    distribucionFragilidad,
+    tareasProgramadasHoy,
+    tareasCompletadasHoy: completadasHoy,
+    tareasNoRealizadasHoy: noRealizadasHoy,
+    adherenciaTareasHoyPct: pct(completadasHoy, completadasHoy + noRealizadasHoy),
+    tomasMedicacionHoy,
+    administradasHoy,
+    reaccionesAdversasHoy,
+  }
+}
+
+/**
+ * Estadísticas clínicas individuales: historial VGI con deltas, adherencia
+ * a tareas en los últimos 30 días y eventos adversos registrados en el DURO.
+ */
+export async function getResidentStats(residentId: string): Promise<ResidentStats> {
+  const sesion = await obtenerSesionActiva()
+  if (!sesion) redirect('/login')
+  if (!esUuidFase5(residentId)) throw new Error('Identificador de residente no válido.')
+
+  const supabase = await createClient()
+  const hoy = fechaLocalISO()
+  const desde = new Date()
+  desde.setDate(desde.getDate() - DIAS_ADHERENCIA)
+  const desdeIso = fechaLocalISO(desde)
+
+  /* 1) Historial VGI (ascendente para calcular deltas consecutivos). */
+  const { data: vgis, error: errVgi } = await supabase
+    .from('vgi_assessments')
+    .select('assessment_date, barthel_index, mmse_score, frailty_level')
+    .eq('resident_id', residentId)
+    .order('assessment_date', { ascending: true })
+    .returns<Pick<VgiAssessmentRow, 'assessment_date' | 'barthel_index' | 'mmse_score' | 'frailty_level'>[]>()
+  if (errVgi) throw new Error(normalizarErrorBd(errVgi.message))
+  const historial = (vgis ?? []).map((v) => ({
+    fecha: v.assessment_date,
+    barthel: v.barthel_index,
+    mmse: v.mmse_score,
+    fragilidad: v.frailty_level,
+  }))
+
+  const ultimo = historial.at(-1) ?? null
+  const penultimo = historial.at(-2) ?? null
+  const deltaBarthel =
+    ultimo?.barthel != null && penultimo?.barthel != null ? ultimo.barthel - penultimo.barthel : null
+  const deltaMmse =
+    ultimo?.mmse != null && penultimo?.mmse != null ? ultimo.mmse - penultimo.mmse : null
+
+  /* 2) Adherencia: ids de tareas → ejecuciones del periodo (batch, sin N+1). */
+  const { data: tareas, error: errTareas } = await supabase
+    .from('care_tasks')
+    .select('id')
+    .eq('resident_id', residentId)
+    .returns<{ id: string }[]>()
+  if (errTareas) throw new Error(normalizarErrorBd(errTareas.message))
+  const idsTareas = (tareas ?? []).map((t) => t.id)
+
+  let ejecucionesCompletadas = 0
+  let ejecucionesOmitidas = 0
+  if (idsTareas.length > 0) {
+    const { data: ejecuciones, error: errEjec } = await supabase
+      .from('task_executions')
+      .select('outcome')
+      .in('task_id', idsTareas)
+      .gte('executed_at', `${desdeIso}T00:00:00`)
+      .lte('executed_at', timestampDeFechaYHora(hoy, '23:59:59'))
+      .returns<Pick<TaskExecutionRow, 'outcome'>[]>()
+    if (errEjec) throw new Error(normalizarErrorBd(errEjec.message))
+    for (const e of ejecuciones ?? []) {
+      if (e.outcome === 'completada') ejecucionesCompletadas += 1
+      else ejecucionesOmitidas += 1
+    }
+  }
+
+  /* 3) DURO del residente: ids de medicación → conteos de adversos. */
+  const { data: meds, error: errMeds } = await supabase
+    .from('medications')
+    .select('id, active')
+    .eq('resident_id', residentId)
+    .returns<Pick<MedicationRow, 'id' | 'active'>[]>()
+  if (errMeds) throw new Error(normalizarErrorBd(errMeds.message))
+  const idsMeds = (meds ?? []).map((m) => m.id)
+
+  let eventosAdversosTotal = 0
+  let eventosAdversos30dias = 0
+  if (idsMeds.length > 0) {
+    const { data: adversos, error: errAdv } = await supabase
+      .from('medication_administrations')
+      .select('administered_at')
+      .in('medication_id', idsMeds)
+      .eq('adverse_reaction', true)
+      .returns<{ administered_at: string }[]>()
+    if (errAdv) throw new Error(normalizarErrorBd(errAdv.message))
+    for (const a of adversos ?? []) {
+      eventosAdversosTotal += 1
+      if (a.administered_at.slice(0, 10) >= desdeIso) eventosAdversos30dias += 1
+    }
+  }
+
+  /* 4) Planes activos. */
+  const { count: planesActivos, error: errPlanes } = await supabase
+    .from('care_plans')
+    .select('id', { count: 'exact', head: true })
+    .eq('resident_id', residentId)
+    .eq('status', 'activo')
+  if (errPlanes) throw new Error(normalizarErrorBd(errPlanes.message))
+
+  return {
+    residenteId: residentId,
+    vgiHistorial: historial,
+    ultimoBarthel: ultimo?.barthel ?? null,
+    deltaBarthel,
+    ultimoMmse: ultimo?.mmse ?? null,
+    deltaMmse,
+    adherenciaDias: DIAS_ADHERENCIA,
+    ejecucionesCompletadas,
+    ejecucionesOmitidas,
+    adherenciaPct: pct(ejecucionesCompletadas, ejecucionesCompletadas + ejecucionesOmitidas),
+    eventosAdversosTotal,
+    eventosAdversos30dias,
+    planesActivos: planesActivos ?? 0,
+    medicacionesActivas: (meds ?? []).filter((m) => m.active).length,
+  }
+}
+
+/**
+ * Consulta paginada de `access_logs` con filtros por usuario, rango de
+ * fechas, acción y entidad. Solo administración: se valida el rol además
+ * de la RLS `access_logs_select_own_or_admin`.
+ */
+export async function getAuditLogs(filtros: AuditFilters): Promise<AuditPage> {
+  const sesion = await obtenerSesionActiva()
+  if (!sesion) redirect('/login')
+  if (sesion.rol !== 'admin') {
+    throw new Error('Acceso denegado: solo la administración puede consultar la auditoría.')
+  }
+
+  const supabase = await createClient()
+  const page = Math.max(1, Math.floor(filtros.page ?? 1))
+  const pageSize = Math.min(100, Math.max(5, Math.floor(filtros.pageSize ?? 20)))
+
+  let query = supabase
+    .from('access_logs')
+    .select('*', { count: 'exact' })
+    .order('created_at', { ascending: false })
+
+  if (filtros.userId && esUuidFase5(filtros.userId)) query = query.eq('user_id', filtros.userId)
+  if (filtros.desde && /^\d{4}-\d{2}-\d{2}$/.test(filtros.desde)) {
+    query = query.gte('created_at', `${filtros.desde}T00:00:00`)
+  }
+  if (filtros.hasta && /^\d{4}-\d{2}-\d{2}$/.test(filtros.hasta)) {
+    query = query.lte('created_at', `${filtros.hasta}T23:59:59`)
+  }
+  if (filtros.action && /^[a-z_.:-]{2,60}$/i.test(filtros.action)) {
+    query = query.ilike('action', `%${filtros.action}%`)
+  }
+  if (filtros.entityType && /^[a-z_.:-]{2,60}$/i.test(filtros.entityType)) {
+    query = query.eq('entity_type', filtros.entityType)
+  }
+
+  const { data, count, error } = await query
+    .range((page - 1) * pageSize, page * pageSize - 1)
+    .returns<AccessLogRow[]>()
+  if (error) throw new Error(normalizarErrorBd(error.message))
+
+  const logs = data ?? []
+  /* Enriquecimiento batch: una sola lectura de perfiles para la página. */
+  const idsUsuarios = [...new Set(logs.map((l) => l.user_id).filter((u): u is string => u !== null))]
+  const nombres = new Map<string, string>()
+  if (idsUsuarios.length > 0) {
+    const { data: perfiles } = await supabase
+      .from('profiles')
+      .select('id, full_name')
+      .in('id', idsUsuarios)
+      .returns<Pick<ProfileRow, 'id' | 'full_name'>[]>()
+    for (const p of perfiles ?? []) nombres.set(p.id, p.full_name)
+  }
+
+  const total = count ?? logs.length
+  return {
+    logs: logs.map((l) => ({ ...l, userName: l.user_id ? nombres.get(l.user_id) ?? null : null })),
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  }
+}
+
+/**
+ * Top N residentes con mayor riesgo clínico (fragilidad «frágil» según la
+ * última VGI, ordenados por menor Barthel). Se apoya en el índice
+ * `idx_vgi_resident_date` de la migración 003.
+ */
+export async function getTopRiesgo(limit = 5): Promise<ResidenteRiesgo[]> {
+  const sesion = await obtenerSesionActiva()
+  if (!sesion) redirect('/login')
+
+  const supabase = await createClient()
+  const tope = Math.min(20, Math.max(1, Math.floor(limit)))
+
+  const { data: residentes, error: errRes } = await supabase
+    .from('residents')
+    .select('id, first_name, last_name, room_number')
+    .eq('status', 'activo')
+    .returns<Pick<ResidentRow, 'id' | 'first_name' | 'last_name' | 'room_number'>[]>()
+  if (errRes) throw new Error(normalizarErrorBd(errRes.message))
+  const lista = residentes ?? []
+  if (lista.length === 0) return []
+
+  /* Última VGI por residente: una sola lectura batch (sin N+1). */
+  const { data: vgis, error: errVgi } = await supabase
+    .from('vgi_assessments')
+    .select('resident_id, assessment_date, barthel_index, mmse_score, frailty_level')
+    .in('resident_id', lista.map((r) => r.id))
+    .order('assessment_date', { ascending: false })
+    .limit(5000)
+    .returns<
+      Pick<VgiAssessmentRow, 'resident_id' | 'assessment_date' | 'barthel_index' | 'mmse_score' | 'frailty_level'>[]
+    >()
+  if (errVgi) throw new Error(normalizarErrorBd(errVgi.message))
+
+  const hoy = fechaLocalISO()
+  const ultima = new Map<string, Pick<VgiAssessmentRow, 'assessment_date' | 'barthel_index' | 'mmse_score' | 'frailty_level'>>()
+  for (const v of vgis ?? []) {
+    if (!ultima.has(v.resident_id)) ultima.set(v.resident_id, v)
+  }
+
+  return lista
+    .map((r) => {
+      const v = ultima.get(r.id) ?? null
+      return {
+        id: r.id,
+        nombre: nombreResidente(r),
+        habitacion: r.room_number,
+        barthel: v?.barthel_index ?? null,
+        mmse: v?.mmse_score ?? null,
+        fragilidad: v?.frailty_level ?? null,
+        diasDesdeUltimaVgi: v ? diasEntre(v.assessment_date.slice(0, 10), hoy) : null,
+      }
+    })
+    .filter((r) => r.fragilidad === 'fragil')
+    .sort((a, b) => {
+      const ba = a.barthel ?? -1
+      const bb = b.barthel ?? -1
+      if (ba !== bb) return ba - bb
+      return (a.diasDesdeUltimaVgi ?? 9999) - (b.diasDesdeUltimaVgi ?? 9999)
+    })
+    .slice(0, tope)
+}
+
+/**
+ * Listado plano de residentes visibles para la exportación CSV del módulo
+ * de reportes (proyección mínima; la RLS restringe las filas).
+ */
+export async function getResidentsForExport(): Promise<ResidentRow[]> {
+  const sesion = await obtenerSesionActiva()
+  if (!sesion) redirect('/login')
+
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('residents')
+    .select('*')
+    .order('status', { ascending: true })
+    .order('first_name')
+    .returns<ResidentRow[]>()
+  if (error) throw new Error(normalizarErrorBd(error.message))
+  return data ?? []
+}
+
+/**
+ * Alertas clínicas del turno actual (AlertBanner, Fase 5):
+ *  1. Tareas urgentes prioritarias vencidas hace ≥ 2 h sin ejecutar.
+ *  2. Tomas de medicación pendientes de administrar en las últimas 2 h.
+ *  3. Signos vitales fuera de rango registrados en task_execuciones del día.
+ *  4. Reacciones adversas registradas hoy en el DURO.
+ *
+ * Rendimiento: 4 consultas batch apoyadas en los índices de la migración 003.
+ */
+export async function getClinicalAlerts(): Promise<AlertSummary> {
+  const sesion = await obtenerSesionActiva()
+  if (!sesion) redirect('/login')
+
+  const supabase = await createClient()
+  const ahora = new Date()
+  const hoy = fechaLocalISO(ahora)
+  const inicioDia = `${hoy}T00:00:00`
+  const umbralHace2h = new Date(ahora.getTime() - 2 * 60 * 60 * 1000)
+  const horaLimiteSql = `${String(umbralHace2h.getHours()).padStart(2, '0')}:${String(umbralHace2h.getMinutes()).padStart(2, '0')}:00`
+
+  const alerts: ClinicalAlert[] = []
+
+  /* --- 1) Tareas urgentes sin completar (≥2 h de retraso) -------------- */
+  type TareaAlerta = Pick<
+    CareTaskRow,
+    'id' | 'resident_id' | 'title' | 'scheduled_time' | 'priority' | 'effective_from' | 'effective_until' | 'days_of_week'
+  > & {
+    residents: Pick<ResidentRow, 'id' | 'first_name' | 'last_name'> | null
+  }
+  const { data: tareasVencidas, error: errT1 } = await supabase
+    .from('care_tasks')
+    .select('id, resident_id, title, scheduled_time, priority, effective_from, effective_until, days_of_week, residents!inner(id, first_name, last_name)')
+    .eq('status', 'programada')
+    .eq('priority', 'urgente')
+    .lte('effective_from', hoy)
+    .or(`effective_until.is.null,effective_until.gte.${hoy}`)
+    .lte('scheduled_time', horaLimiteSql)
+    .returns<TareaAlerta[]>()
+  if (errT1) throw new Error(normalizarErrorBd(errT1.message))
+
+  let urgentesSinCompletar = 0
+  for (const t of tareasVencidas ?? []) {
+    if (
+      !tareaProgramadaParaElDia(
+        {
+          ...t,
+          task_type: 'otro',
+          status: 'programada',
+          care_plan_id: null,
+          description: null,
+          frequency: 'diaria',
+          assigned_to: null,
+          created_by: null,
+          created_at: '',
+          updated_at: '',
+        },
+        hoy,
+      )
+    )
+      continue
+    /* ¿Se registró alguna ejecución hoy para esta tarea? */
+    const { count } = await supabase
+      .from('task_executions')
+      .select('id', { count: 'exact', head: true })
+      .eq('task_id', t.id)
+      .gte('executed_at', inicioDia)
+    if ((count ?? 0) > 0) continue
+    urgentesSinCompletar += 1
+    if (alerts.length < 8) {
+      alerts.push({
+        id: `tarea-${t.id}`,
+        level: 'critico',
+        titulo: 'Tarea urgente sin completar',
+        detalle: `${t.title}${t.residents ? ` · ${nombreResidente(t.residents)}` : ''} (programada ${t.scheduled_time.slice(0, 5)}, más de 2 h de retraso)`,
+        href: '/dashboard/tareas',
+      })
+    }
+  }
+
+  /* --- 2) Medicaciones pendientes del turno ----------------------------- */
+  type MedAlerta = Pick<MedicationRow, 'id' | 'name' | 'dosage' | 'schedule_times'> & {
+    residents: Pick<ResidentRow, 'id' | 'first_name' | 'last_name'> | null
+  }
+  const { data: medsPendientes, error: errM2 } = await supabase
+    .from('medications')
+    .select('id, name, dosage, schedule_times, residents!inner(id, first_name, last_name)')
+    .eq('active', true)
+    .lte('start_date', hoy)
+    .or(`end_date.is.null,end_date.gte.${hoy}`)
+    .returns<MedAlerta[]>()
+  if (errM2) throw new Error(normalizarErrorBd(errM2.message))
+
+  const idsMeds = (medsPendientes ?? []).map((m) => m.id)
+  const adminsHoyPorMed = new Map<string, Set<string>>()
+  if (idsMeds.length > 0) {
+    const { data: admins, error: errA2 } = await supabase
+      .from('medication_administrations')
+      .select('medication_id, scheduled_at')
+      .in('medication_id', idsMeds)
+      .gte('administered_at', inicioDia)
+      .returns<Pick<MedicationAdministrationRow, 'medication_id' | 'scheduled_at'>[]>()
+    if (errA2) throw new Error(normalizarErrorBd(errA2.message))
+    for (const a of admins ?? []) {
+      const set = adminsHoyPorMed.get(a.medication_id) ?? new Set<string>()
+      if (a.scheduled_at) set.add(a.scheduled_at.slice(11, 16))
+      adminsHoyPorMed.set(a.medication_id, set)
+    }
+  }
+
+  let medicacionesPendientes = 0
+  for (const m of medsPendientes ?? []) {
+    const registradas = adminsHoyPorMed.get(m.id) ?? new Set<string>()
+    for (const horaSql of m.schedule_times) {
+      if (!/^\d{2}:\d{2}/.test(horaSql)) continue
+      const hhmm = horaSql.slice(0, 5)
+      if (horaSql >= `${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}`) {
+        continue // toma futura
+      }
+      if (registradas.has(hhmm)) continue
+      medicacionesPendientes += 1
+      if (alerts.length < 8) {
+        alerts.push({
+          id: `med-${m.id}-${hhmm}`,
+          level: 'advertencia',
+          titulo: 'Medicación pendiente de administrar',
+          detalle: `${m.name} ${m.dosage}${m.residents ? ` · ${nombreResidente(m.residents)}` : ''} (toma de las ${hhmm})`,
+          href: '/dashboard/medicaciones/administrar',
+        })
+      }
+    }
+  }
+
+  /* --- 3) Signos vitales fuera de rango (ejecuciones de hoy) ------------ */
+  const { data: ejecucionesHoy, error: errE3 } = await supabase
+    .from('task_executions')
+    .select('id, vital_signs')
+    .gte('executed_at', inicioDia)
+    .not('vital_signs', 'is', null)
+    .limit(1000)
+    .returns<Pick<TaskExecutionRow, 'id' | 'vital_signs'>[]>()
+  if (errE3) throw new Error(normalizarErrorBd(errE3.message))
+
+  let signosFueraDeRango = 0
+  for (const e of ejecucionesHoy ?? []) {
+    const anomalías = detectarAnomaliasSignos(e.vital_signs)
+    if (anomalías.length === 0) continue
+    signosFueraDeRango += 1
+    if (alerts.length < 10) {
+      alerts.push({
+        id: `vital-${e.id}`,
+        level: 'critico',
+        titulo: 'Signos vitales fuera de rango',
+        detalle: anomalías.join(' · '),
+        href: '/dashboard/tareas',
+      })
+    }
+  }
+
+  /* --- 4) Reacciones adversas de hoy ------------------------------------ */
+  const { count: adversasHoy, error: errA4 } = await supabase
+    .from('medication_administrations')
+    .select('id', { count: 'exact', head: true })
+    .eq('adverse_reaction', true)
+    .gte('administered_at', inicioDia)
+  if (errA4) throw new Error(normalizarErrorBd(errA4.message))
+  const totalAdversas = adversasHoy ?? 0
+  if (totalAdversas > 0) {
+    alerts.unshift({
+      id: 'adversas-hoy',
+      level: 'critico',
+      titulo: `Reacciones adversas hoy: ${totalAdversas}`,
+      detalle: 'Registros DURO con reacción adversa en el día. Revise el historial de administración.',
+      href: '/dashboard/medicaciones/administrar',
+    })
+  }
+
+  return {
+    generatedAt: ahora.toISOString(),
+    alerts,
+    urgentesSinCompletar,
+    medicacionesPendientes,
+    signosFueraDeRango,
+  }
+}
+
+/**
+ * Datos para el gráfico de evolución Barthel/MMSE (reportes, Fase 5).
+ * Una sola pasada sobre vgi_assessments ordenada por fecha (sin N+1).
+ */
+export async function getVgiParaEvolucion(): Promise<{
+  opciones: { id: string; nombre: string }[]
+  historiales: Record<string, { fecha: string; barthel: number | null; mmse: number | null }[]>
+}> {
+  const sesion = await obtenerSesionActiva()
+  if (!sesion) redirect('/login')
+
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('vgi_assessments')
+    .select('resident_id, assessment_date, barthel_index, mmse_score, residents!inner(id, first_name, last_name)')
+    .order('assessment_date', { ascending: true })
+    .limit(5000)
+    .returns<
+      {
+        resident_id: string
+        assessment_date: string
+        barthel_index: number | null
+        mmse_score: number | null
+        residents: Pick<ResidentRow, 'id' | 'first_name' | 'last_name'> | null
+      }[]
+    >()
+  if (error) throw new Error(normalizarErrorBd(error.message))
+
+  const opcionesMap = new Map<string, { id: string; nombre: string }>()
+  const historiales: Record<string, { fecha: string; barthel: number | null; mmse: number | null }[]> = {}
+  for (const v of data ?? []) {
+    const rid = v.resident_id
+    if (!opcionesMap.has(rid) && v.residents) {
+      opcionesMap.set(rid, { id: rid, nombre: nombreResidente(v.residents) })
+    }
+    ;(historiales[rid] ??= []).push({ fecha: v.assessment_date, barthel: v.barthel_index, mmse: v.mmse_score })
+  }
+  return { opciones: [...opcionesMap.values()], historiales }
 }

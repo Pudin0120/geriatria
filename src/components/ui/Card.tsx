@@ -4,12 +4,14 @@ import { cn } from '@/lib/utils'
 interface CardProps {
   children: ReactNode
   className?: string
+  id?: string
 }
 
 /** Tarjeta base con sombra suave y bordes redondeados. */
-export function Card({ children, className }: CardProps) {
+export function Card({ children, className, id }: CardProps) {
   return (
     <div
+      id={id}
       className={cn(
         'rounded-xl border border-slate-200 bg-white shadow-sm',
         className,
