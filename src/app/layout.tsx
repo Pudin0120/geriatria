@@ -19,6 +19,20 @@ export const metadata: Metadata = {
   },
   description:
     'Plataforma de gestión clínica para residencias de adultos mayores: valoración geriátrica integral, planes de cuidado, medicación y auditoría de accesos.',
+  // Preparación PWA (Fase 7): tema visual y modo standalone para "Agregar a pantalla de inicio".
+  manifest: '/manifest.webmanifest',
+  themeColor: '#0f766e',
+  viewport: {
+    width: 'device-width',
+    initialScale: 1,
+    maximumScale: 1,
+    userScalable: false,
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'GeriCare',
+  },
 }
 
 export default function RootLayout({ children }: LayoutProps<'/'>) {

@@ -672,3 +672,20 @@ export type CreateTaskFormValues = z.input<typeof CreateTaskSchema>
 
 /** Payload ya validado que consume la Server Action. */
 export type CreateTaskInput = z.output<typeof CreateTaskSchema>
+
+/* ================================================================== */
+/* 8. FASE 7 — Módulo móvil de auxiliares (reexport centralizado)     */
+/* ================================================================== */
+
+export type {
+  ExecuteTaskMobileResult,
+  TareaMovilAuxiliar,
+  VitalSignsMobileValues,
+} from './auxiliar'
+export {
+  RESULTADO_EJECUCION_INICIAL,
+  TAMANIO_MAXIMO_FOTO_BASE64,
+  VITAL_SIGNS_LABELS,
+  VITAL_SIGNS_RANGES,
+  VitalSignsMobileSchema,
+} from './auxiliar'

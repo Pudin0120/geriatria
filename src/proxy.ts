@@ -40,7 +40,9 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  const esRutaProtegida = request.nextUrl.pathname.startsWith('/dashboard')
+  const esRutaProtegida =
+    request.nextUrl.pathname.startsWith('/dashboard') ||
+    request.nextUrl.pathname.startsWith('/auxiliar')
   const esRutaPublica =
     request.nextUrl.pathname === '/login' || request.nextUrl.pathname === '/'
 
