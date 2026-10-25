@@ -191,6 +191,12 @@ export interface CareTaskRow {
   status: TaskStatus
   effective_from: string
   effective_until: string | null
+  /** Serie de recurrencia (migración 004): instancias creadas juntas comparten el mismo uuid. */
+  recurrence_group_id: string
+  /** La ejecución debe capturar signos vitales (migración 004). */
+  requires_vitals: boolean
+  /** La ejecución debe adjuntar fotografía de evidencia (migración 004). */
+  requires_photo: boolean
   created_by: string | null
   created_at: string
   updated_at: string
@@ -401,6 +407,9 @@ interface CareTasksTable {
     status?: TaskStatus
     effective_from?: string
     effective_until?: string | null
+    recurrence_group_id?: string
+    requires_vitals?: boolean
+    requires_photo?: boolean
     created_by?: string | null
     created_at?: string
     updated_at?: string

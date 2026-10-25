@@ -1859,16 +1859,29 @@ export async function getClinicalAlerts(): Promise<AlertSummary> {
 
   let urgentesSinCompletar = 0
   for (const t of tareasVencidas ?? []) {
+    // Solo se necesitan los campos que `tareaProgramadaParaElDia` lee
+    // (effective_from, effective_until, days_of_week); el resto se rellena
+    // con valores neutros para satisfacer CareTaskRow sin `any`.
     if (
       !tareaProgramadaParaElDia(
         {
-          ...t,
-          task_type: 'otro',
-          status: 'programada',
+          id: t.id,
+          resident_id: t.resident_id,
           care_plan_id: null,
+          task_type: 'otro',
+          title: t.title,
           description: null,
+          scheduled_time: t.scheduled_time,
+          days_of_week: t.days_of_week,
           frequency: 'diaria',
           assigned_to: null,
+          priority: t.priority,
+          status: 'programada',
+          effective_from: t.effective_from,
+          effective_until: t.effective_until,
+          recurrence_group_id: t.id,
+          requires_vitals: false,
+          requires_photo: false,
           created_by: null,
           created_at: '',
           updated_at: '',

@@ -1,6 +1,7 @@
 import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
 import { connection } from 'next/server'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { obtenerSesionActiva } from '@/lib/supabase/session'
 import { SkeletonTable } from '@/components/ui/Skeleton'
@@ -65,11 +66,21 @@ export default async function TareasPage({ searchParams }: TareasPageProps) {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Tareas del día</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Agenda clínica de hoy: marca las tareas completadas y registra la medicación administrada.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Tareas del día</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Agenda clínica de hoy: marca las tareas completadas y registra la medicación administrada.
+          </p>
+        </div>
+        {PUEDE_PLANIFICAR.includes(sesion.rol) ? (
+          <Link
+            href="/dashboard/tareas/nuevo"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 text-sm font-medium text-white transition-colors hover:bg-teal-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
+          >
+            + Nueva tarea
+          </Link>
+        ) : null}
       </header>
 
       <Suspense fallback={<SkeletonTable filas={6} />}>
@@ -78,6 +89,9 @@ export default async function TareasPage({ searchParams }: TareasPageProps) {
     </div>
   )
 }
+
+/** Roles que pueden planificar/crear tareas (Fase 6). */
+const PUEDE_PLANIFICAR: readonly string[] = ['admin', 'nurse_jefe', 'medico']
 
 /* ------------------------------------------------------------------ */
 /* Consulta agregada de la agenda diaria                               */
