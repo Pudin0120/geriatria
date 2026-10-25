@@ -25,6 +25,8 @@ function enlacesPorRol(rol: UserRole): SidebarLinkDef[] {
   ]
 
   const clinicos: SidebarLinkDef[] = [
+    // Kardex general de medicación (Fase 8): solo lectura, agrupado por residente.
+    { href: '/dashboard/medicaciones', label: 'Kardex de medicación', icon: Icons.medications },
     // Los planes y medicaciones por residente se gestionan desde su ficha;
     // este acceso directo lleva a la agenda global como punto de partida.
     { href: '/dashboard/residentes?ver=planes', label: 'Planes de cuidado', icon: Icons.plans },
