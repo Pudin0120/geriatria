@@ -47,6 +47,65 @@ export type {
 } from '@/lib/estados-form'
 
 /* ================================================================== */
+/* Auditoría · bitácora `access_logs`                                  */
+/* ================================================================== */
+
+/**
+ * Escribe un registro en `public.access_logs` tras una mutación sensible.
+ *
+ * Diseño:
+ *  - Es "fire-and-forget": NUNCA lanza excepciones ni bloquea la acción de
+ *    usuario; si la inserción falla solo se registra en el log del servidor.
+ *  - Nunca recibe datos clínicos libres: solo identificadores técnicos y
+ *    contadores (ver `AUDITORIA_ACCIONES`).
+ *  - La RLS (`access_logs_insert_any_authenticated`) permite insertar como
+ *    máximo la propia identidad; el actor es siempre `auth.uid()` real.
+ */
+async function registrarAuditoria(entrada: {
+  accion: string
+  entidadTipo?: string
+  entidadId?: string
+}): Promise<void> {
+  try {
+    const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return
+    await supabase.from('access_logs').insert({
+      user_id: user.id,
+      action: entrada.accion,
+      entity_type: entrada.entidadTipo ?? null,
+      entity_id: entrada.entidadId ?? null,
+      metadata: { source: 'server_action' },
+    })
+  } catch {
+    // La auditoría no debe romper nunca el flujo clínico.
+    console.error('[GeriCare] No se pudo escribir en access_logs:', entrada.accion)
+  }
+}
+
+/**
+ * Acciones auditadas del sistema (constantes estables, sin PII).
+ * Nota de arquitectura: se mantiene como constante LOCAL porque un módulo
+ * `'use server'` solo puede exportar funciones async; exportar objetos o
+ * constantes rompe la compilación de Next.js.
+ */
+const AUDITORIA_ACCIONES = {
+  LOGIN: 'auth.login',
+  LOGOUT: 'auth.logout',
+  SIGNUP: 'auth.signup',
+  RESIDENT_CREATE: 'resident.create',
+  RESIDENT_UPDATE: 'resident.update',
+  VGI_CREATE: 'vgi.create',
+  CARE_PLAN_CREATE: 'care_plan.create',
+  MEDICATION_CREATE: 'medication.create',
+  MEDICATION_TOGGLE: 'medication.toggle_active',
+  TASK_EXECUTE: 'task.execute',
+  MEDICATION_ADMINISTER: 'medication.administer',
+} as const
+
+/* ================================================================== */
 /* Tipos de estado de formulario (sin `any`)                           */
 /* ================================================================== */
 
@@ -149,12 +208,14 @@ export async function login(
     return { error: mensajeErrorAuth(error.message) }
   }
 
+  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.LOGIN, entidadTipo: 'auth' })
   revalidatePath('/', 'layout')
   redirect('/dashboard')
 }
 
 /** Cierra la sesión actual y regresa a la pantalla de inicio de sesión. */
 export async function logout(): Promise<void> {
+  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.LOGOUT, entidadTipo: 'auth' })
   const supabase = await createClient()
   await supabase.auth.signOut()
   revalidatePath('/', 'layout')
@@ -199,6 +260,8 @@ export async function signup(
   if (error) {
     return { error: mensajeErrorAuth(error.message), exito: false }
   }
+
+  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.SIGNUP, entidadTipo: 'auth', entidadId: data.user?.id })
 
   // Si Supabase no devolvió sesión (correo sin confirmar), informamos al usuario.
   if (!data.session) {
@@ -360,6 +423,7 @@ export async function createResident(
     return { ...ESTADO_INICIAL_FORM, error: normalizarErrorBd(error.message) }
   }
 
+  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.RESIDENT_CREATE, entidadTipo: 'residents', entidadId: creado.id })
   revalidatePath('/dashboard/residentes')
   revalidatePath('/dashboard')
   redirect(`/dashboard/residentes/${creado.id}`)
@@ -412,6 +476,7 @@ export async function updateResident(
     return { ...ESTADO_INICIAL_FORM, error: normalizarErrorBd(error.message) }
   }
 
+  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.RESIDENT_UPDATE, entidadTipo: 'residents', entidadId: id })
   revalidatePath('/dashboard/residentes')
   revalidatePath(`/dashboard/residentes/${id}`)
   redirect(`/dashboard/residentes/${id}`)
@@ -570,6 +635,7 @@ export async function createVgiAssessment(
     return { error: normalizarErrorBd(error.message), exito: false, campos: {} }
   }
 
+  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.VGI_CREATE, entidadTipo: 'vgi_assessments', entidadId: residentId })
   revalidatePath(`/dashboard/residentes/${residentId}`)
   revalidatePath('/dashboard/residentes')
   redirect(`/dashboard/residentes/${residentId}`)
@@ -832,6 +898,7 @@ export async function createCarePlan(
   })
 
   if (!rpcError && rpcResultado?.plan_id) {
+    void registrarAuditoria({ accion: AUDITORIA_ACCIONES.CARE_PLAN_CREATE, entidadTipo: 'care_plans', entidadId: rpcResultado.plan_id })
     revalidatePath(`/dashboard/residentes/${residentId}/planes`)
     revalidatePath(`/dashboard/residentes/${residentId}`)
     revalidatePath('/dashboard/tareas')
@@ -849,6 +916,8 @@ export async function createCarePlan(
   if (errorPlan || !planCreado) {
     return { ...ESTADO_CLINICO_INICIAL, error: normalizarErrorBd(errorPlan?.message ?? ERROR_INTERNO) }
   }
+
+  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.CARE_PLAN_CREATE, entidadTipo: 'care_plans', entidadId: planCreado.id })
 
   for (const t of tareas) {
     const insercionTarea: TablesInsert<'care_tasks'> = {
@@ -1019,6 +1088,7 @@ export async function createMedication(
     return { ...ESTADO_CLINICO_INICIAL, error: normalizarErrorBd(error.message) }
   }
 
+  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.MEDICATION_CREATE, entidadTipo: 'medications', entidadId: residentId })
   revalidatePath(`/dashboard/residentes/${residentId}/medicaciones`)
   revalidatePath(`/dashboard/residentes/${residentId}`)
   revalidatePath('/dashboard/medicaciones/administrar')
@@ -1085,6 +1155,7 @@ export async function executeTask(
   // Si RLS impide actualizar el estado, la bitácora queda igualmente registrada.
   void errorEstado
 
+  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.TASK_EXECUTE, entidadTipo: 'task_executions', entidadId: taskId })
   revalidatePath('/dashboard/tareas')
   revalidatePath(`/dashboard/residentes/${tarea.resident_id}/planes`)
   revalidatePath('/dashboard')
@@ -1201,6 +1272,7 @@ export async function administerMedication(
     return { ...ESTADO_CLINICO_INICIAL, error: normalizarErrorBd(error.message) }
   }
 
+  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.MEDICATION_ADMINISTER, entidadTipo: 'medication_administrations', entidadId: medicamento.id })
   revalidatePath('/dashboard/medicaciones/administrar')
   revalidatePath(`/dashboard/residentes/${medicamento.resident_id}/medicaciones`)
   revalidatePath('/dashboard')
@@ -1274,6 +1346,7 @@ export async function toggleMedicationActive(
     return { ...ESTADO_CLINICO_INICIAL, error: normalizarErrorBd(error.message) }
   }
 
+  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.MEDICATION_TOGGLE, entidadTipo: 'medications', entidadId: medicationId })
   revalidatePath(`/dashboard/residentes/${medicamento.resident_id}/medicaciones`)
   revalidatePath('/dashboard/medicaciones/administrar')
   return { ...ESTADO_CLINICO_INICIAL, exito: true }
@@ -1745,8 +1818,11 @@ export async function getClinicalAlerts(): Promise<AlertSummary> {
   const ahora = new Date()
   const hoy = fechaLocalISO(ahora)
   const inicioDia = `${hoy}T00:00:00`
-  const umbralHace2h = new Date(ahora.getTime() - 2 * 60 * 60 * 1000)
-  const horaLimiteSql = `${String(umbralHace2h.getHours()).padStart(2, '0')}:${String(umbralHace2h.getMinutes()).padStart(2, '0')}:00`
+  /* Umbral robusto: una tarea urgente se considera vencida si su instante
+     programado (fecha + scheduled_time) quedó al menos 2 h atrás. Se filtra
+     por fecha en BD y se confirma el instante exacto en memoria, evitando
+     falsos positivos cuando las 2 h cruzan la medianoche. */
+  const umbralHace2hMs = ahora.getTime() - 2 * 60 * 60 * 1000
 
   const alerts: ClinicalAlert[] = []
 
@@ -1764,9 +1840,22 @@ export async function getClinicalAlerts(): Promise<AlertSummary> {
     .eq('priority', 'urgente')
     .lte('effective_from', hoy)
     .or(`effective_until.is.null,effective_until.gte.${hoy}`)
-    .lte('scheduled_time', horaLimiteSql)
     .returns<TareaAlerta[]>()
   if (errT1) throw new Error(normalizarErrorBd(errT1.message))
+
+  /* Conteos de ejecuciones de HOY en UNA sola consulta (evita N+1). */
+  const idsTareasVigentes = [...new Set((tareasVencidas ?? []).map((t) => t.id))]
+  const idsTareasEjecutadasHoy = new Set<string>()
+  if (idsTareasVigentes.length > 0) {
+    const { data: ejecHoy, error: errEH } = await supabase
+      .from('task_executions')
+      .select('task_id')
+      .in('task_id', idsTareasVigentes)
+      .gte('executed_at', inicioDia)
+      .returns<{ task_id: string }[]>()
+    if (errEH) throw new Error(normalizarErrorBd(errEH.message))
+    for (const e of ejecHoy ?? []) idsTareasEjecutadasHoy.add(e.task_id)
+  }
 
   let urgentesSinCompletar = 0
   for (const t of tareasVencidas ?? []) {
@@ -1788,13 +1877,11 @@ export async function getClinicalAlerts(): Promise<AlertSummary> {
       )
     )
       continue
-    /* ¿Se registró alguna ejecución hoy para esta tarea? */
-    const { count } = await supabase
-      .from('task_executions')
-      .select('id', { count: 'exact', head: true })
-      .eq('task_id', t.id)
-      .gte('executed_at', inicioDia)
-    if ((count ?? 0) > 0) continue
+    /* El instante programado debe tener ≥2 h de retraso real. */
+    const instanteProgramado = new Date(`${t.effective_from}T${t.scheduled_time}`).getTime()
+    if (Number.isNaN(instanteProgramado) || instanteProgramado > umbralHace2hMs) continue
+    /* ¿Se registró alguna ejecución hoy para esta tarea? (consulta batch única) */
+    if (idsTareasEjecutadasHoy.has(t.id)) continue
     urgentesSinCompletar += 1
     if (alerts.length < 8) {
       alerts.push({
