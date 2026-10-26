@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { diagnosticarConfigSupabase } from '@/lib/supabase/env'
 import { obtenerSesionActiva } from '@/lib/supabase/session'
 import {
   fechaLocalISO,
@@ -119,27 +120,35 @@ const USUARIO_EXISTE =
   'Ya existe una cuenta registrada con ese correo electrónico.'
 
 /**
- * Diagnóstico temprano: si faltan las variables de entorno de Supabase,
- * las Server Actions fallarían con un mensaje genérico. Aquí se detecta
- * y se informa con precisión (sin exponer valores ni claves).
+ * Diagnóstico temprano: si faltan o están mal formadas las variables de
+ * entorno de Supabase, las Server Actions fallarían con un mensaje genérico
+ * («invalid key»). Delegamos en el validador central (`env.ts`) que detecta
+ * undefined, URL inválida, secret key expuesta, JWT legacy service_role, etc.
+ * Nunca devuelve valores crudos de las claves (no hay fuga al cliente).
  */
 function validarConfiguracionSupabase(): string | null {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  const diagnostico = diagnosticarConfigSupabase()
+  if (!diagnostico) return null
+  return (
+    'Falta la configuración válida de Supabase en este entorno. ' +
+    'Define NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY (publishable key) ' +
+    'en .env.local (raíz del proyecto) y reinicia el servidor / vuelve a desplegar. ' +
+    `Diagnóstico técnico: ${diagnostico}`
+  )
+}
 
-  if (!url || !anonKey) {
-    return (
-      'Falta la configuración de Supabase en este entorno. ' +
-      'Define NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY en .env.local ' +
-      '(o en los Secrets de Vercel) y REINICIA el servidor / vuelve a desplegar.'
-    )
-  }
-  try {
-    new URL(url)
-  } catch {
-    return 'NEXT_PUBLIC_SUPABASE_URL no tiene un formato válido (debe ser https://xxxx.supabase.co).'
-  }
-  return null
+/**
+ * Valida un destino de redirección post-login: SOLO rutas relativas internas
+ * seguras. Rechaza protocolos absolutos (`https://evil.tld`), protocol-relative
+ * (`//evil.tld` → open redirect) y backslashes (`\\evil.tld`).
+ */
+function esRutaRelativaSegura(destino: string): boolean {
+  return (
+    destino.startsWith('/') &&
+    !destino.startsWith('//') &&
+    !destino.startsWith('/\\') &&
+    !/^\/[a-z][a-z0-9+.-]*:/i.test(destino)
+  )
 }
 
 /** Normaliza errores de Supabase Auth a mensajes comprensibles en español. */
@@ -180,7 +189,9 @@ function leerCampo(formData: FormData, clave: string): string {
 
 /**
  * Inicia sesión con correo y contraseña.
- * En caso de éxito redirige al dashboard; en caso contrario devuelve el error.
+ * En caso de éxito redirige al destino solicitado (`redirectTo` del form,
+ * propagado desde `?redirect=` por el proxy) o a `/dashboard` por defecto;
+ * en caso contrario devuelve el error.
  */
 export async function login(
   _estadoPrevio: LoginState,
@@ -188,6 +199,8 @@ export async function login(
 ): Promise<LoginState> {
   const email = leerCampo(formData, 'email')
   const password = leerCampo(formData, 'password')
+  // Destino opcional inyectado por LoginForm desde la query `?redirect=`.
+  const redirectTo = leerCampo(formData, 'redirectTo')
 
   if (email.length === 0 || !email.includes('@')) {
     return { error: EMAIL_INVALIDO }
@@ -210,7 +223,8 @@ export async function login(
 
   void registrarAuditoria({ accion: AUDITORIA_ACCIONES.LOGIN, entidadTipo: 'auth' })
   revalidatePath('/', 'layout')
-  redirect('/dashboard')
+  // Anti open-redirect: solo se acepta una ruta relativa interna segura.
+  redirect(esRutaRelativaSegura(redirectTo) ? redirectTo : '/dashboard')
 }
 
 /** Cierra la sesión actual y regresa a la pantalla de inicio de sesión. */

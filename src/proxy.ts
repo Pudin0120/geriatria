@@ -1,5 +1,13 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { configSupabaseOpcional, diagnosticarConfigSupabase } from '@/lib/supabase/env'
+
+/**
+ * Bandera de módulo: el diagnóstico por falta/malformación de variables de
+ * entorno se registra UNA SOLA VEZ por proceso (cold start) para no inundar
+ * la consola del servidor en cada petición.
+ */
+let diagnosticoEmitido = false
 
 /**
  * Proxy (antes middleware) de GeriCare.
@@ -10,17 +18,22 @@ import { NextResponse, type NextRequest } from 'next/server'
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-  // Sin configuración de Supabase no se puede validar la sesión: se deja
-  // pasar la petición; las páginas protegidas siguen validando su propia
-  // sesión en el layout del dashboard.
-  if (!url || !anonKey) {
+  // Sin configuración válida de Supabase no se puede validar la sesión: se
+  // deja pasar la petición; las páginas protegidas siguen validando su propia
+  // sesión en el layout del dashboard (que sí fallará con mensaje claro).
+  const config = configSupabaseOpcional()
+  if (!config) {
+    if (!diagnosticoEmitido) {
+      diagnosticoEmitido = true
+      console.error(
+        '[GeriCare][proxy] Supabase sin configurar — sesión no verificable. ' +
+          `Diagnóstico: ${diagnosticarConfigSupabase() ?? 'desconocido'}`,
+      )
+    }
     return supabaseResponse
   }
 
-  const supabase = createServerClient(url, anonKey, {
+  const supabase = createServerClient(config.url, config.anonKey, {
     cookies: {
       getAll() {
         return request.cookies.getAll()
