@@ -23,6 +23,7 @@ const residents = {
 const tasks = {
   asignada: '30000000-0000-4000-8000-000000000001',
   ajena: '30000000-0000-4000-8000-000000000002',
+  evidencia: '30000000-0000-4000-8000-000000000003',
 }
 const medication = '40000000-0000-4000-8000-000000000001'
 
@@ -147,6 +148,10 @@ before(async () => {
     values
       ('${tasks.asignada}', '${residents.uno}', 'higiene', 'Tarea asignada', '08:00', '${users.auxiliar}', '${users.medico}'),
       ('${tasks.ajena}', '${residents.dos}', 'higiene', 'Tarea de otra persona', '08:00', '${users.auxiliarOtro}', '${users.admin}');
+    insert into public.care_tasks
+      (id, resident_id, task_type, title, scheduled_time, assigned_to, created_by, requires_vitals, requires_photo)
+    values
+      ('${tasks.evidencia}', '${residents.uno}', 'higiene', 'Tarea con evidencia', '09:00', '${users.auxiliar}', '${users.medico}', true, true);
     insert into public.medications (id, resident_id, name, dosage, created_by)
     values ('${medication}', '${residents.uno}', 'Medicamento de prueba', '1 unidad', '${users.medico}');
   `)
@@ -282,14 +287,44 @@ test('RPC registra tareas solo al usuario asignado y sincroniza estado/auditorí
   )
   const before = await db.query('select count(*)::int as count from public.task_executions')
   assert.equal(before.rows[0].count, 0)
+  await assert.rejects(
+    () => asUser(users.medico, () => db.query(
+      'select public.record_task_execution($1, $2::public.task_status, $3, $4::jsonb)',
+      [tasks.asignada, 'completada', '', '{}'],
+    )),
+    /role cannot execute care tasks|42501/i,
+  )
+  await assert.rejects(
+    () => asUser(users.auxiliar, () => db.query(
+      'select public.record_task_execution($1, $2::public.task_status, $3, $4::jsonb)',
+      [tasks.evidencia, 'completada', '', '{}'],
+    )),
+    /task requires vital signs|22023/i,
+  )
+  await assert.rejects(
+    () => asUser(users.auxiliar, () => db.query(
+      'select public.record_task_execution($1, $2::public.task_status, $3, $4::jsonb)',
+      [tasks.evidencia, 'completada', '', '{"frecuencia_cardiaca":72}'],
+    )),
+    /task requires photo evidence|22023/i,
+  )
   await asUser(users.auxiliar, () => db.query(
     'select public.record_task_execution($1, $2::public.task_status, $3, $4::jsonb)',
     [tasks.asignada, 'completada', 'Hecho', '{"frecuencia_cardiaca":72}'],
   ))
+  await asUser(users.auxiliar, () => db.query(
+    'select public.record_task_execution($1, $2::public.task_status, $3, $4::jsonb)',
+    [tasks.evidencia, 'completada', 'Evidencia guardada', '{"frecuencia_cardiaca":72,"photo_data_url":"data:image/jpeg;base64,YQ=="}'],
+  ))
   const task = await db.query('select status::text from public.care_tasks where id = $1', [tasks.asignada])
   assert.equal(task.rows[0].status, 'completada')
+  const evidence = await db.query(
+    'select vital_signs->>\'photo_data_url\' as photo from public.task_executions where task_id = $1',
+    [tasks.evidencia],
+  )
+  assert.equal(evidence.rows[0].photo, 'data:image/jpeg;base64,YQ==')
   const audit = await db.query("select count(*)::int as count from public.access_logs where action = 'task_executions.insert' and user_id = $1", [users.auxiliar])
-  assert.equal(audit.rows[0].count, 1)
+  assert.equal(audit.rows[0].count, 2)
 })
 
 test('solo enfermería, jefatura y admin pueden administrar medicación dentro de su alcance', async () => {

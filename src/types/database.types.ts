@@ -98,6 +98,7 @@ export interface VitalSignsRecord {
   temperatura?: number
   saturacion_oxigeno?: number
   glucemia?: number
+  photo_data_url?: string
   [key: string]: string | number | boolean | null | undefined
 }
 

@@ -13,11 +13,6 @@ export interface LoginState {
   error: string | null
 }
 
-export interface SignupState {
-  error: string | null
-  exito: boolean
-}
-
 export interface ResidentFormState {
   error: string | null
   exito: boolean

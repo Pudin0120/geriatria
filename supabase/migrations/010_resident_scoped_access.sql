@@ -198,8 +198,15 @@ begin
     raise exception 'notes too long' using errcode = '22023';
   end if;
   if jsonb_typeof(signs) <> 'object'
-    or (signs - 'tension_arterial' - 'frecuencia_cardiaca' - 'temperatura' - 'saturacion_oxigeno' - 'glucemia') <> '{}'::jsonb then
+    or (signs - 'tension_arterial' - 'frecuencia_cardiaca' - 'temperatura' - 'saturacion_oxigeno' - 'glucemia' - 'photo_data_url') <> '{}'::jsonb then
     raise exception 'invalid vital signs payload' using errcode = '22023';
+  end if;
+  if signs ? 'photo_data_url' and (
+    jsonb_typeof(signs->'photo_data_url') <> 'string'
+    or length(signs->>'photo_data_url') > 250000
+    or signs->>'photo_data_url' !~* '^data:image/(png|jpe?g|webp);base64,[a-z0-9+/]*={0,2}$'
+  ) then
+    raise exception 'invalid task photo evidence' using errcode = '22023';
   end if;
   if signs ? 'tension_arterial' and
     (jsonb_typeof(signs->'tension_arterial') <> 'string' or (signs->>'tension_arterial') !~ '^\d{2,3}/\d{2,3}$') then
@@ -243,6 +250,13 @@ begin
   end if;
   if actor_role not in ('admin','nurse_jefe') and task_row.assigned_to is distinct from auth.uid() then
     raise exception 'task not assigned to current user' using errcode = '42501';
+  end if;
+  if p_outcome = 'completada' and task_row.requires_vitals
+    and not (signs ?| array['tension_arterial','frecuencia_cardiaca','temperatura','saturacion_oxigeno','glucemia']) then
+    raise exception 'task requires vital signs' using errcode = '22023';
+  end if;
+  if p_outcome = 'completada' and task_row.requires_photo and not (signs ? 'photo_data_url') then
+    raise exception 'task requires photo evidence' using errcode = '22023';
   end if;
   insert into public.task_executions(task_id, executed_by, executed_at, outcome, notes, vital_signs)
     values (p_task_id, auth.uid(), now(), p_outcome, nullif(btrim(p_notes), ''), signs)

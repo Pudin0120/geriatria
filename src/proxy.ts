@@ -1,25 +1,38 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { configSupabaseOpcional, diagnosticarConfigSupabase } from '@/lib/supabase/env'
+
+/**
+ * Bandera de módulo: el diagnóstico por falta/malformación de variables de
+ * entorno se registra UNA SOLA VEZ por proceso (cold start) para no inundar
+ * la consola del servidor en cada petición.
+ */
+let diagnosticoEmitido = false
 
 /**
  * Proxy (antes middleware) de GeriCare.
- * Protege las rutas bajo /dashboard. La comprobación del perfil activo se
- * realiza en el layout; permitir /login a una sesión inválida evita bucles.
+ * Protege el panel y la vista de tareas del auxiliar. El layout y la página
+ * validan además que el usuario tenga un perfil activo.
  */
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-  // Sin configuración de Supabase no se puede validar la sesión: se deja
-  // pasar la petición; las páginas protegidas siguen validando su propia
-  // sesión en el layout del dashboard.
-  if (!url || !anonKey) {
+  // Sin configuración válida de Supabase no se puede validar la sesión: se
+  // deja pasar la petición; las páginas protegidas siguen validando su propia
+  // sesión en el layout del dashboard (que sí fallará con mensaje claro).
+  const config = configSupabaseOpcional()
+  if (!config) {
+    if (!diagnosticoEmitido) {
+      diagnosticoEmitido = true
+      console.error(
+        '[GeriCare][proxy] Supabase sin configurar — sesión no verificable. ' +
+          `Diagnóstico: ${diagnosticarConfigSupabase() ?? 'desconocido'}`,
+      )
+    }
     return supabaseResponse
   }
 
-  const supabase = createServerClient(url, anonKey, {
+  const supabase = createServerClient(config.url, config.anonKey, {
     cookies: {
       getAll() {
         return request.cookies.getAll()
@@ -39,7 +52,9 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  const esRutaProtegida = request.nextUrl.pathname.startsWith('/dashboard')
+  const esRutaProtegida =
+    request.nextUrl.pathname.startsWith('/dashboard') ||
+    request.nextUrl.pathname.startsWith('/auxiliar')
   if (esRutaProtegida && !user) {
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('redirect', request.nextUrl.pathname)

@@ -15,7 +15,7 @@ export function LoginForm() {
 
   return (
     <form action={accion} className="space-y-4" noValidate>
-      <input type="hidden" name="redirect" value={searchParams.get('redirect') ?? ''} />
+      <input type="hidden" name="redirectTo" value={searchParams.get('redirect') ?? ''} />
       <Input
         id="email"
         label="Correo electrónico"

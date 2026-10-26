@@ -33,17 +33,15 @@ import type {
   ClinicalFormState,
   LoginState,
   ResidentFormState,
-  SignupState,
   VgiFormState,
 } from '@/lib/estados-form'
 import { RANGOS_VGI, type CampoVgi } from '@/lib/vgi-rangos'
-import { readPasswordField } from '@/lib/auth/form-fields.mjs'
+import { getSafePostLoginRedirect, readPasswordField } from '@/lib/auth/form-fields.mjs'
 
 export type {
   ClinicalFormState,
   LoginState,
   ResidentFormState,
-  SignupState,
   VgiFormState,
 } from '@/lib/estados-form'
 
@@ -57,8 +55,6 @@ const CREDENCIALES_INCORRECTAS =
   'Credenciales incorrectas. Verifica tu correo y contraseña.'
 const ERROR_INTERNO =
   'Ocurrió un problema al comunicarse con el servidor. Inténtalo de nuevo.'
-const USUARIO_EXISTE =
-  'Ya existe una cuenta registrada con ese correo electrónico.'
 
 /**
  * Diagnóstico temprano: si faltan las variables de entorno de Supabase,
@@ -90,9 +86,6 @@ function mensajeErrorAuth(descripcion: string): string {
   if (texto.includes('invalid login credentials')) return CREDENCIALES_INCORRECTAS
   if (texto.includes('email not confirmed')) {
     return 'Tu correo aún no está confirmado. Revisa tu bandeja de entrada.'
-  }
-  if (texto.includes('already registered') || texto.includes('already exists')) {
-    return USUARIO_EXISTE
   }
   if (texto.includes('rate limit') || texto.includes('too many requests')) {
     return 'Demasiados intentos. Espera unos minutos antes de reintentar.'
@@ -130,6 +123,7 @@ export async function login(
 ): Promise<LoginState> {
   const email = leerCampo(formData, 'email')
   const password = readPasswordField(formData)
+  const redirectTo = leerCampo(formData, 'redirectTo')
 
   if (email.length === 0 || !email.includes('@')) {
     return { error: EMAIL_INVALIDO }
@@ -163,8 +157,7 @@ export async function login(
     // Authentication remains usable if audit storage is temporarily unavailable.
   }
   revalidatePath('/', 'layout')
-  const destino = leerCampo(formData, 'redirect')
-  redirect(destino === '/dashboard' || destino.startsWith('/dashboard/') ? destino : '/dashboard')
+  redirect(getSafePostLoginRedirect(redirectTo))
 }
 
 /** Cierra la sesión actual y regresa a la pantalla de inicio de sesión. */
@@ -178,19 +171,6 @@ export async function logout(): Promise<void> {
   await supabase.auth.signOut()
   revalidatePath('/', 'layout')
   redirect('/login')
-}
-
-/**
- * Mantiene compatibilidad de formulario, pero rechaza el registro público.
- * Las cuentas se crean por invitación administrativa.
- */
-export async function signup(
-  _estadoPrevio: SignupState,
-  formData: FormData,
-): Promise<SignupState> {
-  void _estadoPrevio
-  void formData
-  return { error: 'El registro público está deshabilitado. Solicita una invitación al administrador.', exito: false }
 }
 
 /* ================================================================== */
