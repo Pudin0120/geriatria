@@ -191,6 +191,12 @@ export interface CareTaskRow {
   status: TaskStatus
   effective_from: string
   effective_until: string | null
+  /** Serie de recurrencia (migración 004): instancias creadas juntas comparten el mismo uuid. */
+  recurrence_group_id: string
+  /** La ejecución debe capturar signos vitales (migración 004). */
+  requires_vitals: boolean
+  /** La ejecución debe adjuntar fotografía de evidencia (migración 004). */
+  requires_photo: boolean
   created_by: string | null
   created_at: string
   updated_at: string
@@ -401,6 +407,9 @@ interface CareTasksTable {
     status?: TaskStatus
     effective_from?: string
     effective_until?: string | null
+    recurrence_group_id?: string
+    requires_vitals?: boolean
+    requires_photo?: boolean
     created_by?: string | null
     created_at?: string
     updated_at?: string
@@ -516,6 +525,25 @@ export interface DatabaseSchema {
 /** Nombre literal de cada tabla pública. */
 export type TableName = keyof DatabaseSchema
 
+/** Parámetros de la RPC transaccional de planes de cuidado (migración 002). */
+export interface CreateCarePlanWithTasksArgs {
+  p_resident_id: string
+  p_title: string
+  p_description?: string | null
+  p_goals?: string[]
+  p_start_date?: string
+  p_end_date?: string | null
+  p_review_date?: string | null
+  p_status?: CarePlanStatus
+  p_tasks?: readonly Record<string, unknown>[]
+}
+
+/** Resultado de la RPC `create_care_plan_with_tasks`. */
+export interface CreateCarePlanWithTasksResult {
+  plan_id: string
+  task_count: number
+}
+
 /** Esquema completo en el formato estándar de Supabase (`public.tables`). */
 export interface Database {
   public: {
@@ -525,6 +553,10 @@ export interface Database {
       is_admin: { Args: Record<string, never>; Returns: boolean }
       is_nurse_or_above: { Args: Record<string, never>; Returns: boolean }
       current_user_role: { Args: Record<string, never>; Returns: UserRole }
+      create_care_plan_with_tasks: {
+        Args: CreateCarePlanWithTasksArgs
+        Returns: CreateCarePlanWithTasksResult
+      }
     }
     Enums: {
       user_role: UserRole

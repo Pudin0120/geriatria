@@ -477,6 +477,18 @@ export function isResidentStatus(value: unknown): value is ResidentStatus {
   return typeof value === 'string' && (RESIDENT_STATUS_VALUES as readonly string[]).includes(value)
 }
 
+const RESIDENT_GENDER_VALUES = ['masculino', 'femenino', 'otro'] as const satisfies readonly ResidentGender[]
+
+export function isResidentGender(value: unknown): value is ResidentGender {
+  return typeof value === 'string' && (RESIDENT_GENDER_VALUES as readonly string[]).includes(value)
+}
+
+const FRAILTY_LEVEL_VALUES = ['fragil', 'pre_fragil', 'robusto'] as const satisfies readonly FrailtyLevel[]
+
+export function isFrailtyLevel(value: unknown): value is FrailtyLevel {
+  return typeof value === 'string' && (FRAILTY_LEVEL_VALUES as readonly string[]).includes(value)
+}
+
 export function isDayOfWeek(value: unknown): value is DayOfWeek {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 7
 }
@@ -540,3 +552,140 @@ export interface AuditLogEntry {
   entity: string
   metadata: AccessLogMetadata
 }
+
+/* ================================================================== */
+/* FASE 6 · Planificación de tareas con recurrencia                    */
+/* ================================================================== */
+
+/** Patrón de recurrencia soportado por el formulario de creación de tareas. */
+export type RecurrencePattern = 'none' | 'daily' | 'lmi_vie' | 'custom'
+
+/** Etiquetas en español para cada patrón de recurrencia. */
+export const RECURRENCE_PATTERN_LABELS: Readonly<Record<RecurrencePattern, string>> = {
+  none: 'Sin repetición (tarea única)',
+  daily: 'Diaria',
+  lmi_vie: 'Lunes · Miércoles · Viernes',
+  custom: 'Personalizada (elegir días)',
+}
+
+/** Días del patrón fijo «Lunes · Miércoles · Viernes» (ISO 8601). */
+export const DIAS_LMV: readonly number[] = [1, 3, 5]
+
+/** Ventana de generación física de instancias de recurrencia (días). */
+export const VENTANA_RECURRENCIA_DIAS = 30 as const
+
+/**
+ * Payload validado que acepta la Server Action `createTaskWithRecurrence`.
+ * `scheduled_time` es un timestamp ISO-8601 completo (fecha + hora locales
+ * convertidas a UTC); la BD lo descompone en `effective_from` + `scheduled_time`.
+ */
+export interface CreateTaskPayload {
+  resident_id: string
+  assigned_to: string | null
+  task_type: TaskType
+  title: string
+  description: string | null
+  scheduled_time: string
+  recurrence: RecurrencePattern
+  /** Solo aplicable cuando recurrence === 'custom'. Días ISO 1–7. */
+  recurrence_days: number[]
+  requires_vitals: boolean
+  requires_photo: boolean
+  priority: TaskPriority
+}
+
+/** Resultado de la creación: nº de instancias físicas generadas. */
+export interface CreateTaskResult {
+  exito: boolean
+  mensaje: string
+  instanciasCreadas: number
+}
+
+/* ================================================================== */
+/* FASE 6 · Esquema Zod del formulario de creación de tareas           */
+/* ================================================================== */
+
+import { z } from 'zod'
+
+const PATRONES_RECURRENCIA = ['none', 'daily', 'lmi_vie', 'custom'] as const
+const TIPOS_TAREA = Object.keys(TASK_TYPE_LABELS) as [TaskType, ...TaskType[]]
+const PRIORIDADES_TAREA = ['baja', 'normal', 'alta', 'urgente'] as const
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
+const FECHA_HORA_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/
+
+/**
+ * Esquema compartido (cliente y servidor) para crear una tarea con recurrencia.
+ * `scheduled_time` es un datetime local sin segundos ('YYYY-MM-DDTHH:mm'),
+ * tal como lo entrega `<input type="datetime-local">`.
+ */
+export const CreateTaskSchema = z
+  .object({
+    resident_id: z.string().regex(UUID_RE, 'Selecciona un residente válido de la lista.'),
+    assigned_to: z
+      .union([z.string().regex(UUID_RE, 'Selecciona un auxiliar válido.'), z.literal('')])
+      .refine((v) => v === '' || UUID_RE.test(v), 'Selecciona un auxiliar válido o deja vacío.'),
+    task_type: z.enum(TIPOS_TAREA, { message: 'El tipo de tarea no es válido.' }),
+    title: z
+      .string()
+      .trim()
+      .min(3, 'El título debe tener al menos 3 caracteres.')
+      .max(140, 'El título no puede superar 140 caracteres.'),
+    description: z
+      .string()
+      .trim()
+      .max(1000, 'La descripción no puede superar 1000 caracteres.')
+      .optional()
+      .or(z.literal('')),
+    scheduled_time: z
+      .string()
+      .regex(FECHA_HORA_RE, 'Indica fecha y hora válidas (formato AAAA-MM-DDThh:mm).')
+      .refine((v) => !Number.isNaN(new Date(v).getTime()), 'La fecha y hora indicadas no son válidas.'),
+    recurrence: z.enum(PATRONES_RECURRENCIA, {
+      message: 'El patrón de recurrencia no es válido.',
+    }),
+    recurrence_days: z
+      .array(z.number().int().min(1, 'Día fuera de rango (1–7).').max(7, 'Día fuera de rango (1–7).'))
+      .default([]),
+    requires_vitals: z.boolean().default(false),
+    requires_photo: z.boolean().default(false),
+    priority: z.enum(PRIORIDADES_TAREA, { message: 'La prioridad seleccionada no es válida.' }),
+  })
+  .superRefine((val, ctx) => {
+    if (val.recurrence === 'custom' && val.recurrence_days.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['recurrence_days'],
+        message: 'En recurrencia personalizada debes marcar al menos un día.',
+      })
+    }
+    if (val.recurrence !== 'custom' && val.recurrence_days.length > 7) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['recurrence_days'],
+        message: 'No puedes seleccionar más de 7 días.',
+      })
+    }
+  })
+
+/** Tipo inferido por Zod para los valores crudos del formulario. */
+export type CreateTaskFormValues = z.input<typeof CreateTaskSchema>
+
+/** Payload ya validado que consume la Server Action. */
+export type CreateTaskInput = z.output<typeof CreateTaskSchema>
+
+/* ================================================================== */
+/* 8. FASE 7 — Módulo móvil de auxiliares (reexport centralizado)     */
+/* ================================================================== */
+
+export type {
+  ExecuteTaskMobileResult,
+  TareaMovilAuxiliar,
+  VitalSignsMobileValues,
+} from './auxiliar'
+export {
+  RESULTADO_EJECUCION_INICIAL,
+  TAMANIO_MAXIMO_FOTO_BASE64,
+  VITAL_SIGNS_LABELS,
+  VITAL_SIGNS_RANGES,
+  VitalSignsMobileSchema,
+} from './auxiliar'

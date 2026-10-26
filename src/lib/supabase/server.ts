@@ -20,7 +20,7 @@ export async function createClient() {
           } catch {
             // El set puede fallar en algunos Server Components, es manejado por Next.js
           }
-3. },
+        },
       },
     }
   )
