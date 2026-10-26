@@ -24,8 +24,6 @@ import { normalizarErrorBdPublic } from '@/lib/errores'
 import type {
   CareTaskRow,
   ExecuteTaskMobileResult,
-  ExecutionOutcome,
-  TablesInsert,
   VitalSignsMobileValues,
   VitalSignsRecord,
 } from '@/types'
@@ -41,10 +39,8 @@ import {
 /* Constantes locales                                                 */
 /* ================================================================== */
 
-const ACCION_AUDITORIA = 'task.execute_mobile' as const
-
 /** Roles que pueden operar la vista móvil de ejecución (auxiliar o superior). */
-const ROLES_PERMITIDOS_EJECUTAR = ['admin', 'nurse_jefe', 'auxiliar', 'medico'] as const
+const ROLES_PERMITIDOS_EJECUTAR = ['admin', 'nurse_jefe', 'enfermeria', 'auxiliar'] as const
 
 const UUID_REGEX = /^[0-9a-fA-F-]{36}$/
 
@@ -135,32 +131,6 @@ function validarFoto(raw: FormDataEntryValue | null): { valor: string | null; er
 }
 
 /* ================================================================== */
-/* Auditoría interna (fire-and-forget)                                */
-/* ================================================================== */
-
-async function registrarAuditoriaEjecucion(entrada: {
-  entidadId: string
-  outcome: ExecutionOutcome
-}): Promise<void> {
-  try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) return
-    await supabase.from('access_logs').insert({
-      user_id: user.id,
-      action: ACCION_AUDITORIA,
-      entity_type: 'task_executions',
-      entity_id: entrada.entidadId,
-      metadata: { source: 'server_action', outcome: entrada.outcome },
-    })
-  } catch {
-    console.error('[GeriCare] No se pudo auditar la ejecución móvil de tarea.')
-  }
-}
-
-/* ================================================================== */
 /* Server Action principal                                            */
 /* ================================================================== */
 
@@ -240,41 +210,19 @@ export async function executeTask(
     return { ...RESULTADO_EJECUCION_INICIAL, mensaje: 'Esta tarea requiere adjuntar una fotografía de evidencia.' }
   }
 
-  // 4. Inserción en la bitácora (DURO) + actualización del estado visible.
-  const insercion: TablesInsert<'task_executions'> = {
-    task_id: taskId,
-    executed_by: sesion.userId,
-    executed_at: new Date().toISOString(),
-    outcome: outcomeRaw,
-    notes: notes.length > 0 ? notes : null,
-    vital_signs: vitalesAJsonb(parseo.data),
-  }
-
-  const { error } = await supabase.from('task_executions').insert(insercion)
+  // 4. La RPC aplica la asignación, ejecución, estado y auditoría en una sola
+  // transacción. RLS no concede escrituras directas a estas tablas clínicas.
+  const signosPersistidos = vitalesAJsonb(parseo.data)
+  if (foto.valor !== null) signosPersistidos.photo_data_url = foto.valor
+  const { error } = await supabase.rpc('record_task_execution', {
+    p_task_id: taskId,
+    p_outcome: outcomeRaw,
+    p_notes: notes,
+    p_vital_signs: signosPersistidos,
+  })
   if (error) {
     return { ...RESULTADO_EJECUCION_INICIAL, mensaje: normalizarErrorBdPublic(error.message) }
   }
-
-  const { error: errorEstado } = await supabase
-    .from('care_tasks')
-    .update({ status: outcomeRaw })
-    .eq('id', taskId)
-  // Si RLS impide actualizar el estado, la bitácora queda igualmente registrada.
-  void errorEstado
-
-  // 5. Guardar la referencia de la foto junto a la ejecución cuando exista.
-  if (foto.valor !== null) {
-    const { error: errorFoto } = await supabase
-      .from('task_executions')
-      .update({ vital_signs: { ...insercion.vital_signs, photo_url: foto.valor } })
-      .eq('task_id', taskId)
-      .eq('executed_by', sesion.userId)
-      .order('executed_at', { ascending: false })
-      .limit(1)
-    void errorFoto
-  }
-
-  void registrarAuditoriaEjecucion({ entidadId: taskId, outcome: outcomeRaw })
 
   revalidatePath('/auxiliar')
   revalidatePath('/dashboard/tareas')

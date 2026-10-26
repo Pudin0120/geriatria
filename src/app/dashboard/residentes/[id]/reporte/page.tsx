@@ -61,9 +61,8 @@ export default async function ReporteIndividualPage({ params }: ReportePageProps
   const { id } = await params
   if (!esUuid(id)) notFound()
 
-  // Fecha del reporte capturada tras el límite dinámico (connection()): es la
-  // única forma legal de leer `new Date()` en un RSC con cacheComponents sin
-  // provocar el warning «unstable value» durante el prerender.
+  // Capture the dynamic date after connection() so cacheComponents does not
+  // evaluate an unstable value while rendering the footer.
   const fechaReporte = fechaLocalISO()
 
   const sesion = await obtenerSesionActiva()
@@ -449,9 +448,6 @@ export default async function ReporteIndividualPage({ params }: ReportePageProps
       </Card>
 
       <footer className="hidden text-xs text-slate-400 print:block">
-        {/* `fechaReporte` se calcula en la cabecera de este Server Component,
-            ya tras `await connection()` — leer `new Date()` directamente aquí
-            reactivaría el warning «unstable value» con cacheComponents. */}
         GeriCare · Reporte generado el {formatearFecha(fechaReporte)} · {nombreCompleto}
       </footer>
     </div>

@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Badge, FrailtyBadge, ResidentStatusBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { SkeletonTable } from '@/components/ui/Skeleton'
-import type { ProfileRow, ResidentRow, VgiAssessmentRow } from '@/types'
+import type { ResidentRow, VgiAssessmentRow } from '@/types'
 import { GENDER_LABELS, buildResidentFullName, toVgiAssessmentView } from '@/types'
 import { calcularEdadTexto, formatearFecha } from '@/lib/utils'
 
@@ -121,12 +121,8 @@ async function ContenidoDetalle({ id }: { id: string }) {
   )
   let nombresEvaluadores = new Map<string, string>()
   if (evaluadorIds.length > 0) {
-    const { data: perfiles } = await supabase
-      .from('profiles')
-      .select('id, full_name')
-      .in('id', evaluadorIds)
-      .returns<Pick<ProfileRow, 'id' | 'full_name'>[]>()
-    nombresEvaluadores = new Map((perfiles ?? []).map((p) => [p.id, p.full_name]))
+    const { data: perfiles } = await supabase.rpc('get_staff_display_names', { target_profile_ids: evaluadorIds })
+    nombresEvaluadores = new Map((perfiles ?? []).map((p: { id: string; full_name: string }) => [p.id, p.full_name]))
   }
 
   return (

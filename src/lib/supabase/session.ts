@@ -12,8 +12,7 @@ export interface SesionActiva {
 /**
  * Obtiene la sesión activa y el perfil del usuario (con su rol) desde la BD.
  * Se memoiza con `cache()` para que layout y página compartan una sola lectura
- * por petición. Confía en las políticas RLS de la Fase 1: el select sobre
- * `profiles` solo devuelve la propia fila del autenticado.
+ * por petición. Exige un perfil activo y un rol válido; falla cerrada si falta.
  */
 export const obtenerSesionActiva = cache(
   async (): Promise<SesionActiva | null> => {
@@ -30,15 +29,8 @@ export const obtenerSesionActiva = cache(
       .eq('id', user.id)
       .maybeSingle<ProfileRow>()
 
-    // Fallback defensivo: sin perfil visible usamos current_user_role() de la BD.
-    let rol: UserRole = 'auxiliar'
-    if (perfil && isUserRole(perfil.role)) {
-      rol = perfil.role
-    } else {
-      const { data: rolDb } = await supabase.rpc('current_user_role')
-      if (isUserRole(rolDb)) rol = rolDb
-    }
-
-    return { userId: user.id, perfil, rol }
+    // Un perfil ausente, inactivo o mal tipado nunca hereda un rol genérico.
+    if (!perfil?.active || !isUserRole(perfil.role)) return null
+    return { userId: user.id, perfil, rol: perfil.role }
   },
 )

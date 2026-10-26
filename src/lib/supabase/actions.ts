@@ -3,7 +3,6 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { diagnosticarConfigSupabase } from '@/lib/supabase/env'
 import { obtenerSesionActiva } from '@/lib/supabase/session'
 import {
   fechaLocalISO,
@@ -37,6 +36,7 @@ import type {
   VgiFormState,
 } from '@/lib/estados-form'
 import { RANGOS_VGI, type CampoVgi } from '@/lib/vgi-rangos'
+import { getSafePostLoginRedirect, readPasswordField } from '@/lib/auth/form-fields.mjs'
 
 export type {
   ClinicalFormState,
@@ -44,64 +44,6 @@ export type {
   ResidentFormState,
   VgiFormState,
 } from '@/lib/estados-form'
-
-/* ================================================================== */
-/* Auditoría · bitácora `access_logs`                                  */
-/* ================================================================== */
-
-/**
- * Escribe un registro en `public.access_logs` tras una mutación sensible.
- *
- * Diseño:
- *  - Es "fire-and-forget": NUNCA lanza excepciones ni bloquea la acción de
- *    usuario; si la inserción falla solo se registra en el log del servidor.
- *  - Nunca recibe datos clínicos libres: solo identificadores técnicos y
- *    contadores (ver `AUDITORIA_ACCIONES`).
- *  - La RLS (`access_logs_insert_any_authenticated`) permite insertar como
- *    máximo la propia identidad; el actor es siempre `auth.uid()` real.
- */
-async function registrarAuditoria(entrada: {
-  accion: string
-  entidadTipo?: string
-  entidadId?: string
-}): Promise<void> {
-  try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) return
-    await supabase.from('access_logs').insert({
-      user_id: user.id,
-      action: entrada.accion,
-      entity_type: entrada.entidadTipo ?? null,
-      entity_id: entrada.entidadId ?? null,
-      metadata: { source: 'server_action' },
-    })
-  } catch {
-    // La auditoría no debe romper nunca el flujo clínico.
-    console.error('[GeriCare] No se pudo escribir en access_logs:', entrada.accion)
-  }
-}
-
-/**
- * Acciones auditadas del sistema (constantes estables, sin PII).
- * Nota de arquitectura: se mantiene como constante LOCAL porque un módulo
- * `'use server'` solo puede exportar funciones async; exportar objetos o
- * constantes rompe la compilación de Next.js.
- */
-const AUDITORIA_ACCIONES = {
-  LOGIN: 'auth.login',
-  LOGOUT: 'auth.logout',
-  RESIDENT_CREATE: 'resident.create',
-  RESIDENT_UPDATE: 'resident.update',
-  VGI_CREATE: 'vgi.create',
-  CARE_PLAN_CREATE: 'care_plan.create',
-  MEDICATION_CREATE: 'medication.create',
-  MEDICATION_TOGGLE: 'medication.toggle_active',
-  TASK_EXECUTE: 'task.execute',
-  MEDICATION_ADMINISTER: 'medication.administer',
-} as const
 
 /* ================================================================== */
 /* Tipos de estado de formulario (sin `any`)                           */
@@ -115,35 +57,27 @@ const ERROR_INTERNO =
   'Ocurrió un problema al comunicarse con el servidor. Inténtalo de nuevo.'
 
 /**
- * Diagnóstico temprano: si faltan o están mal formadas las variables de
- * entorno de Supabase, las Server Actions fallarían con un mensaje genérico
- * («invalid key»). Delegamos en el validador central (`env.ts`) que detecta
- * undefined, URL inválida, secret key expuesta, JWT legacy service_role, etc.
- * Nunca devuelve valores crudos de las claves (no hay fuga al cliente).
+ * Diagnóstico temprano: si faltan las variables de entorno de Supabase,
+ * las Server Actions fallarían con un mensaje genérico. Aquí se detecta
+ * y se informa con precisión (sin exponer valores ni claves).
  */
 function validarConfiguracionSupabase(): string | null {
-  const diagnostico = diagnosticarConfigSupabase()
-  if (!diagnostico) return null
-  return (
-    'Falta la configuración válida de Supabase en este entorno. ' +
-    'Define NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY (publishable key) ' +
-    'en .env.local (raíz del proyecto) y reinicia el servidor / vuelve a desplegar. ' +
-    `Diagnóstico técnico: ${diagnostico}`
-  )
-}
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-/**
- * Valida un destino de redirección post-login: SOLO rutas relativas internas
- * seguras. Rechaza protocolos absolutos (`https://evil.tld`), protocol-relative
- * (`//evil.tld` → open redirect) y backslashes (`\\evil.tld`).
- */
-function esRutaRelativaSegura(destino: string): boolean {
-  return (
-    destino.startsWith('/') &&
-    !destino.startsWith('//') &&
-    !destino.startsWith('/\\') &&
-    !/^\/[a-z][a-z0-9+.-]*:/i.test(destino)
-  )
+  if (!url || !anonKey) {
+    return (
+      'Falta la configuración de Supabase en este entorno. ' +
+      'Define NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY en .env.local ' +
+      '(o en los Secrets de Vercel) y REINICIA el servidor / vuelve a desplegar.'
+    )
+  }
+  try {
+    new URL(url)
+  } catch {
+    return 'NEXT_PUBLIC_SUPABASE_URL no tiene un formato válido (debe ser https://xxxx.supabase.co).'
+  }
+  return null
 }
 
 /** Normaliza errores de Supabase Auth a mensajes comprensibles en español. */
@@ -181,17 +115,14 @@ function leerCampo(formData: FormData, clave: string): string {
 
 /**
  * Inicia sesión con correo y contraseña.
- * En caso de éxito redirige al destino solicitado (`redirectTo` del form,
- * propagado desde `?redirect=` por el proxy) o a `/dashboard` por defecto;
- * en caso contrario devuelve el error.
+ * En caso de éxito redirige al dashboard; en caso contrario devuelve el error.
  */
 export async function login(
   _estadoPrevio: LoginState,
   formData: FormData,
 ): Promise<LoginState> {
   const email = leerCampo(formData, 'email')
-  const password = leerCampo(formData, 'password')
-  // Destino opcional inyectado por LoginForm desde la query `?redirect=`.
+  const password = readPasswordField(formData)
   const redirectTo = leerCampo(formData, 'redirectTo')
 
   if (email.length === 0 || !email.includes('@')) {
@@ -207,22 +138,36 @@ export async function login(
   }
 
   const supabase = await createClient()
-  const { error } = await supabase.auth.signInWithPassword({ email, password })
+  let error: { message: string } | null
+  try {
+    const result = await supabase.auth.signInWithPassword({ email, password })
+    error = result.error
+  } catch {
+    return { error: ERROR_INTERNO }
+  }
 
   if (error) {
     return { error: mensajeErrorAuth(error.message) }
   }
 
-  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.LOGIN, entidadTipo: 'auth' })
+  // Actor is derived in PostgreSQL from auth.uid(); callers cannot choose a user.
+  try {
+    await supabase.rpc('record_auth_event', { p_action: 'auth.login' })
+  } catch {
+    // Authentication remains usable if audit storage is temporarily unavailable.
+  }
   revalidatePath('/', 'layout')
-  // Anti open-redirect: solo se acepta una ruta relativa interna segura.
-  redirect(esRutaRelativaSegura(redirectTo) ? redirectTo : '/dashboard')
+  redirect(getSafePostLoginRedirect(redirectTo))
 }
 
 /** Cierra la sesión actual y regresa a la pantalla de inicio de sesión. */
 export async function logout(): Promise<void> {
-  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.LOGOUT, entidadTipo: 'auth' })
   const supabase = await createClient()
+  try {
+    await supabase.rpc('record_auth_event', { p_action: 'auth.logout' })
+  } catch {
+    // A telemetry failure must never prevent a user from signing out.
+  }
   await supabase.auth.signOut()
   revalidatePath('/', 'layout')
   redirect('/login')
@@ -376,7 +321,6 @@ export async function createResident(
     return { ...ESTADO_INICIAL_FORM, error: normalizarErrorBd(error.message) }
   }
 
-  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.RESIDENT_CREATE, entidadTipo: 'residents', entidadId: creado.id })
   revalidatePath('/dashboard/residentes')
   revalidatePath('/dashboard')
   redirect(`/dashboard/residentes/${creado.id}`)
@@ -429,7 +373,6 @@ export async function updateResident(
     return { ...ESTADO_INICIAL_FORM, error: normalizarErrorBd(error.message) }
   }
 
-  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.RESIDENT_UPDATE, entidadTipo: 'residents', entidadId: id })
   revalidatePath('/dashboard/residentes')
   revalidatePath(`/dashboard/residentes/${id}`)
   redirect(`/dashboard/residentes/${id}`)
@@ -588,7 +531,6 @@ export async function createVgiAssessment(
     return { error: normalizarErrorBd(error.message), exito: false, campos: {} }
   }
 
-  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.VGI_CREATE, entidadTipo: 'vgi_assessments', entidadId: residentId })
   revalidatePath(`/dashboard/residentes/${residentId}`)
   revalidatePath('/dashboard/residentes')
   redirect(`/dashboard/residentes/${residentId}`)
@@ -609,7 +551,8 @@ const ESTADO_CLINICO_INICIAL: ClinicalFormState = {
 const ROLES_ESCRITURA_CLINICA: readonly UserRole[] = ['admin', 'nurse_jefe', 'medico']
 
 /** Roles autorizados para ejecutar tareas y administrar medicación (RLS lo permite a todo el personal clínico). */
-const ROLES_EJECUCION_CLINICA: readonly UserRole[] = ['admin', 'nurse_jefe', 'auxiliar']
+const ROLES_EJECUCION_CLINICA: readonly UserRole[] = ['admin', 'nurse_jefe', 'enfermeria', 'auxiliar']
+const ROLES_ADMINISTRACION_MEDICACION: readonly UserRole[] = ['admin', 'nurse_jefe', 'enfermeria']
 
 /** Formato HH:mm:ss aceptado por las columnas `time` de PostgreSQL. */
 const RE_HORA_COMPLETA = /^([01]\d|2[0-3]):([0-5]\d):([0-5]\d)$/
@@ -851,7 +794,6 @@ export async function createCarePlan(
   })
 
   if (!rpcError && rpcResultado?.plan_id) {
-    void registrarAuditoria({ accion: AUDITORIA_ACCIONES.CARE_PLAN_CREATE, entidadTipo: 'care_plans', entidadId: rpcResultado.plan_id })
     revalidatePath(`/dashboard/residentes/${residentId}/planes`)
     revalidatePath(`/dashboard/residentes/${residentId}`)
     revalidatePath('/dashboard/tareas')
@@ -870,7 +812,6 @@ export async function createCarePlan(
     return { ...ESTADO_CLINICO_INICIAL, error: normalizarErrorBd(errorPlan?.message ?? ERROR_INTERNO) }
   }
 
-  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.CARE_PLAN_CREATE, entidadTipo: 'care_plans', entidadId: planCreado.id })
 
   for (const t of tareas) {
     const insercionTarea: TablesInsert<'care_tasks'> = {
@@ -1041,7 +982,6 @@ export async function createMedication(
     return { ...ESTADO_CLINICO_INICIAL, error: normalizarErrorBd(error.message) }
   }
 
-  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.MEDICATION_CREATE, entidadTipo: 'medications', entidadId: residentId })
   revalidatePath(`/dashboard/residentes/${residentId}/medicaciones`)
   revalidatePath(`/dashboard/residentes/${residentId}`)
   revalidatePath('/dashboard/medicaciones/administrar')
@@ -1062,6 +1002,9 @@ export async function executeTask(
 ): Promise<ClinicalFormState> {
   const sesion = await obtenerSesionActiva()
   if (!sesion) redirect('/login')
+  if (!ROLES_EJECUCION_CLINICA.includes(sesion.rol)) {
+    return { ...ESTADO_CLINICO_INICIAL, error: 'Tu rol no puede ejecutar tareas de cuidado.' }
+  }
   if (!/^[0-9a-fA-F-]{36}$/.test(taskId)) {
     return { ...ESTADO_CLINICO_INICIAL, error: 'Identificador de tarea no válido.' }
   }
@@ -1076,39 +1019,29 @@ export async function executeTask(
 
   const { data: tarea } = await supabase
     .from('care_tasks')
-    .select('id, resident_id, status')
+    .select('id, resident_id, status, assigned_to')
     .eq('id', taskId)
-    .maybeSingle<Pick<CareTaskRow, 'id' | 'resident_id' | 'status'>>()
+    .maybeSingle<Pick<CareTaskRow, 'id' | 'resident_id' | 'status' | 'assigned_to'>>()
   if (!tarea) {
     return { ...ESTADO_CLINICO_INICIAL, error: 'La tarea no existe o no tienes acceso a ella.' }
   }
   if (tarea.status === 'cancelada') {
     return { ...ESTADO_CLINICO_INICIAL, error: 'No se puede registrar la ejecución de una tarea cancelada.' }
   }
-
-  const insercion: TablesInsert<'task_executions'> = {
-    task_id: taskId,
-    executed_by: sesion.userId,
-    executed_at: new Date().toISOString(),
-    outcome,
-    notes: notes.length > 0 ? notes : null,
-    vital_signs: vitalSigns,
+  if (!['admin', 'nurse_jefe'].includes(sesion.rol) && tarea.assigned_to !== sesion.userId) {
+    return { ...ESTADO_CLINICO_INICIAL, error: 'La tarea no está asignada a tu usuario.' }
   }
 
-  const { error } = await supabase.from('task_executions').insert(insercion)
+  const { error } = await supabase.rpc('record_task_execution', {
+    p_task_id: taskId,
+    p_outcome: outcome,
+    p_notes: notes,
+    p_vital_signs: vitalSigns,
+  })
   if (error) {
     return { ...ESTADO_CLINICO_INICIAL, error: normalizarErrorBd(error.message) }
   }
 
-  // Sincroniza el estado visible de la tarea con el último resultado registrado.
-  const { error: errorEstado } = await supabase
-    .from('care_tasks')
-    .update({ status: outcome })
-    .eq('id', taskId)
-  // Si RLS impide actualizar el estado, la bitácora queda igualmente registrada.
-  void errorEstado
-
-  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.TASK_EXECUTE, entidadTipo: 'task_executions', entidadId: taskId })
   revalidatePath('/dashboard/tareas')
   revalidatePath(`/dashboard/residentes/${tarea.resident_id}/planes`)
   revalidatePath('/dashboard')
@@ -1160,7 +1093,7 @@ export async function administerMedication(
 ): Promise<ClinicalFormState> {
   const sesion = await obtenerSesionActiva()
   if (!sesion) redirect('/login')
-  if (!ROLES_EJECUCION_CLINICA.includes(sesion.rol)) {
+  if (!ROLES_ADMINISTRACION_MEDICACION.includes(sesion.rol)) {
     return { ...ESTADO_CLINICO_INICIAL, error: 'Tu rol no tiene permiso para registrar administraciones de medicación.' }
   }
   if (!/^[0-9a-fA-F-]{36}$/.test(medicationId)) {
@@ -1208,24 +1141,19 @@ export async function administerMedication(
     if (!Number.isNaN(d.getTime())) scheduledAt = d.toISOString()
   }
 
-  const insercion: TablesInsert<'medication_administrations'> = {
-    medication_id: medicationId,
-    administered_by: sesion.userId,
-    administered_at: new Date().toISOString(),
-    scheduled_at: scheduledAt,
-    dose_given: dosis,
-    route_used: route,
-    outcome,
-    adverse_reaction: options.adverseReaction === true && outcome === 'administrada',
-    notes: notas.length > 0 ? notas : null,
-  }
-
-  const { error } = await supabase.from('medication_administrations').insert(insercion)
+  const { error } = await supabase.rpc('record_medication_administration', {
+    p_medication_id: medicationId,
+    p_dose_given: dosis,
+    p_route_used: route,
+    p_outcome: outcome,
+    p_adverse_reaction: options.adverseReaction === true,
+    p_notes: notas,
+    p_scheduled_at: scheduledAt,
+  })
   if (error) {
     return { ...ESTADO_CLINICO_INICIAL, error: normalizarErrorBd(error.message) }
   }
 
-  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.MEDICATION_ADMINISTER, entidadTipo: 'medication_administrations', entidadId: medicamento.id })
   revalidatePath('/dashboard/medicaciones/administrar')
   revalidatePath(`/dashboard/residentes/${medicamento.resident_id}/medicaciones`)
   revalidatePath('/dashboard')
@@ -1299,7 +1227,6 @@ export async function toggleMedicationActive(
     return { ...ESTADO_CLINICO_INICIAL, error: normalizarErrorBd(error.message) }
   }
 
-  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.MEDICATION_TOGGLE, entidadTipo: 'medications', entidadId: medicationId })
   revalidatePath(`/dashboard/residentes/${medicamento.resident_id}/medicaciones`)
   revalidatePath('/dashboard/medicaciones/administrar')
   return { ...ESTADO_CLINICO_INICIAL, exito: true }

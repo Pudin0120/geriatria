@@ -18,33 +18,33 @@ export function ResidentCard({ resident }: ResidentCardProps) {
   const iniciales = `${resident.first_name.charAt(0)}${resident.last_name.charAt(0)}`.toUpperCase()
 
   return (
-    <Card className="transition-shadow hover:shadow-md">
+    <Card className="group overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:border-[#cdded3] hover:shadow-[0_12px_28px_rgba(29,67,56,.08)]">
       <Link
         href={`/dashboard/residentes/${resident.id}`}
-        className="block rounded-xl p-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600"
+        className="block rounded-2xl p-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#176b5b] sm:p-5"
       >
         <div className="flex items-start gap-3">
           {/* Avatar con iniciales */}
           <span
             aria-hidden
-            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-teal-700 text-sm font-bold text-white"
+            className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#e6f2ed] text-sm font-bold text-[#176b5b] ring-1 ring-inset ring-[#d4e7db]"
           >
             {iniciales}
           </span>
 
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2">
-              <h3 className="truncate text-sm font-semibold text-slate-900">
+              <h3 className="truncate text-sm font-semibold text-[#1b302e] group-hover:text-[#176b5b]">
                 {buildResidentFullName(resident)}
               </h3>
               <ResidentStatusBadge status={resident.status} />
             </div>
 
-            <p className="mt-0.5 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-[#71817c]">
               {calcularEdadTexto(resident.birth_date)} · {GENDER_LABELS[resident.gender]}
             </p>
 
-            <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+            <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-[#edf1ee] pt-3 text-xs">
               <div className="flex items-center gap-1.5">
                 <dt className="text-slate-400">Habitación:</dt>
                 <dd className="font-medium text-slate-700">{resident.room_number ?? '—'}</dd>

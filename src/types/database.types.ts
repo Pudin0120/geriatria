@@ -14,7 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 /* ================================================================== */
 
 /** Rol del usuario dentro del sistema. */
-export type UserRole = 'admin' | 'nurse_jefe' | 'auxiliar' | 'medico'
+export type UserRole = 'admin' | 'nurse_jefe' | 'enfermeria' | 'auxiliar' | 'medico' | 'familiar'
 
 /** Tipo de tarea de cuidado. */
 export type TaskType =
@@ -98,6 +98,7 @@ export interface VitalSignsRecord {
   temperatura?: number
   saturacion_oxigeno?: number
   glucemia?: number
+  photo_data_url?: string
   [key: string]: string | number | boolean | null | undefined
 }
 
@@ -556,6 +557,42 @@ export interface Database {
       create_care_plan_with_tasks: {
         Args: CreateCarePlanWithTasksArgs
         Returns: CreateCarePlanWithTasksResult
+      }
+      get_linked_resident_summaries: {
+        Args: Record<string, never>
+        Returns: Array<{ id: string; first_name: string; last_name: string; room_number: string | null; status: ResidentStatus }>
+      }
+      list_assignable_staff: {
+        Args: Record<string, never>
+        Returns: Array<{ id: string; full_name: string; role: UserRole }>
+      }
+      get_staff_display_names: {
+        Args: { target_profile_ids: string[] }
+        Returns: Array<{ id: string; full_name: string }>
+      }
+      record_auth_event: {
+        Args: { p_action: 'auth.login' | 'auth.logout' }
+        Returns: undefined
+      }
+      is_assignable_staff: {
+        Args: { target_user: string }
+        Returns: boolean
+      }
+      record_task_execution: {
+        Args: { p_task_id: string; p_outcome: ExecutionOutcome; p_notes: string; p_vital_signs: VitalSignsRecord }
+        Returns: string
+      }
+      record_medication_administration: {
+        Args: {
+          p_medication_id: string
+          p_dose_given: string
+          p_route_used: MedicationRoute
+          p_outcome: AdministrationOutcome
+          p_adverse_reaction?: boolean
+          p_notes?: string | null
+          p_scheduled_at?: string | null
+        }
+        Returns: string
       }
     }
     Enums: {

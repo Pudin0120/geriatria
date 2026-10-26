@@ -1,8 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+  --background: #f5f7f5;
+  --foreground: #1b302e;
+  --surface: #ffffff;
+  --surface-soft: #f0f5f2;
+  --line: #dfe8e2;
+  --brand: #176b5b;
+  --brand-dark: #104f45;
+  --brand-soft: #e6f2ed;
+  --muted: #6e817c;
+  --font-ui: var(--font-geist-sans), Arial, sans-serif;
 }
 
 @theme inline {
@@ -12,15 +21,51 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+* { box-sizing: border-box; }
+
+html { min-height: 100%; background: var(--background); }
 
 body {
+  min-height: 100%;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-ui);
+  font-feature-settings: "ss01" on;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection { background: #cce6db; color: #123d35; }
+
+:focus-visible {
+  outline: 3px solid #58a990;
+  outline-offset: 3px;
+}
+
+button, input, select, textarea { font: inherit; }
+
+main h1 {
+  color: #1b302e;
+  font-size: clamp(1.55rem, 2vw, 1.9rem);
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+}
+
+main h2, main h3 { letter-spacing: -0.02em; }
+
+main table thead { background: #f7f9f7; }
+main table tbody tr { transition: background-color 140ms ease; }
+main table tbody tr:hover { background-color: #f7faf8; }
+
+@media (max-width: 640px) {
+  main table { min-width: 620px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

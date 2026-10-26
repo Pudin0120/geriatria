@@ -42,7 +42,7 @@ export default async function MedicacionesPage({ params }: MedicacionesPageProps
   if (!sesion) redirect('/login')
 
   const puedePrescribir = ['admin', 'nurse_jefe', 'medico'].includes(sesion.rol)
-  const puedeAdministrar = ['admin', 'nurse_jefe', 'medico', 'auxiliar'].includes(sesion.rol)
+  const puedeAdministrar = ['admin', 'nurse_jefe', 'enfermeria'].includes(sesion.rol)
 
   return (
     <div className="space-y-6">

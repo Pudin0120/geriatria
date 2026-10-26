@@ -1,35 +1,17 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
-/**
- * Callback OAuth/PKCE de Supabase Auth (`/auth/callback`).
- * El proveedor (email magic link, Google, etc.) redirige aquí con `?code=…`;
- * este handler canjea el código por una sesión (intercambio PKCE) guardando
- * las cookies correspondientes y redirige al destino `?next=…` validado.
- *
- * Requiere en Dashboard → Authentication → URL Configuration:
- *   Redirect URLs: http://localhost:3000/auth/callback (y el equivalente en prod).
- */
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url)
-  const code = searchParams.get('code')
-  const nextRaw = searchParams.get('next') ?? '/dashboard'
-
-  // Anti open-redirect: solo rutas relativas internas seguras.
-  const esRutaRelativaSegura =
-    nextRaw.startsWith('/') && !nextRaw.startsWith('//') && !nextRaw.startsWith('/\\')
-  const destino = esRutaRelativaSegura ? nextRaw : '/dashboard'
-
+  const code = request.nextUrl.searchParams.get('code')
+  const next = request.nextUrl.searchParams.get('next')
+  const parsedDestination = next ? new URL(next, request.url) : new URL('/dashboard', request.url)
+  const destination = parsedDestination.origin === request.nextUrl.origin
+    ? `${parsedDestination.pathname}${parsedDestination.search}${parsedDestination.hash}`
+    : '/dashboard'
   if (code) {
     const supabase = await createClient()
     const { error } = await supabase.auth.exchangeCodeForSession(code)
-    if (!error) {
-      return NextResponse.redirect(`${origin}${destino}`)
-    }
-    // Código inválido/expirado/duplicado: volvemos al login con contexto.
-    return NextResponse.redirect(`${origin}/login?error=callback`)
+    if (!error) return NextResponse.redirect(new URL(destination, request.url))
   }
-
-  // Sin código no hay nada que canjear (o el proveedor devolvió `error=`).
-  return NextResponse.redirect(`${origin}/login`)
+  return NextResponse.redirect(new URL('/login?error=auth_callback', request.url))
 }

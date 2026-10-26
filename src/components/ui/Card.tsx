@@ -13,7 +13,7 @@ export function Card({ children, className, id }: CardProps) {
     <div
       id={id}
       className={cn(
-        'rounded-xl border border-slate-200 bg-white shadow-sm',
+        'rounded-2xl border border-[#e1e9e4] bg-white shadow-[0_2px_10px_rgba(27,48,46,0.035)]',
         className,
       )}
     >
@@ -34,14 +34,14 @@ export function CardHeader({ title, subtitle, action, className }: CardHeaderPro
   return (
     <div
       className={cn(
-        'flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4',
+        'flex items-start justify-between gap-4 border-b border-[#edf1ee] px-5 py-4 sm:px-6',
         className,
       )}
     >
       <div>
-        <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+        <h3 className="text-sm font-semibold tracking-tight text-[#1b302e]">{title}</h3>
         {subtitle ? (
-          <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>
+          <p className="mt-1 text-xs leading-5 text-[#71817c]">{subtitle}</p>
         ) : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
@@ -56,5 +56,5 @@ interface CardContentProps {
 
 /** Cuerpo con relleno estándar para el contenido de la tarjeta. */
 export function CardContent({ children, className }: CardContentProps) {
-  return <div className={cn('px-5 py-4', className)}>{children}</div>
+  return <div className={cn('px-5 py-5 sm:px-6', className)}>{children}</div>
 }

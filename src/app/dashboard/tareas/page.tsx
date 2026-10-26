@@ -177,7 +177,7 @@ async function ContenidoAgenda({ fechaIso, rol }: ContenidoProps) {
     ejecucionesHoy,
     medicaciones,
     administracionesHoy,
-    puedeAdministrar: ['admin', 'nurse_jefe', 'medico', 'auxiliar'].includes(rol),
+    puedeAdministrar: ['admin', 'nurse_jefe', 'enfermeria'].includes(rol),
   }
 
   return <AgendaTareasClient inicial={inicial} />

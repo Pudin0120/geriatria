@@ -26,10 +26,10 @@ const nextConfig: NextConfig = {
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           // No filtra URLs completas a terceros en la cabecera Referer.
           { key: 'Referrer-Policy', value: 'same-origin' },
-          // Deniega cámara, micrófono y geolocalización por defecto.
+          // Limita la cámara al mismo origen y bloquea micrófono/geolocalización.
           {
             key: 'Permissions-Policy',
-            value: 'camera=(), microphone=(), geolocation=()',
+            value: 'camera=(self), microphone=(), geolocation=()',
           },
         ],
       },

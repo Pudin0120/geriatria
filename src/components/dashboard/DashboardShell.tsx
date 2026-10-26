@@ -22,26 +22,28 @@ export function DashboardShell({ rol, nombre, enlaces, children }: ShellProps) {
   const [abierto, setAbierto] = useState(false)
 
   return (
-    <div className="flex min-h-dvh bg-slate-100">
+    <div className="flex min-h-dvh bg-[#f5f7f5]">
       {/* Sidebar de escritorio */}
-      <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col bg-slate-900 lg:flex">
+      <aside className="sticky top-0 hidden h-dvh w-[272px] shrink-0 flex-col border-r border-white/10 bg-[#173b36] lg:flex">
         <Navegacion rol={rol} nombre={nombre} enlaces={enlaces} />
       </aside>
 
       {/* Fondo oscurecido del drawer móvil */}
-      <div
+      <button
+        type="button"
         className={cn(
-          'fixed inset-0 z-40 bg-slate-950/60 transition-opacity lg:hidden',
+          'fixed inset-0 z-40 cursor-default bg-slate-950/55 transition-opacity lg:hidden',
           abierto ? 'opacity-100' : 'pointer-events-none opacity-0',
         )}
         onClick={() => setAbierto(false)}
-        aria-hidden={!abierto}
+        aria-label="Cerrar menú de navegación"
+        tabIndex={abierto ? 0 : -1}
       />
 
       {/* Drawer móvil */}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-slate-900 shadow-2xl transition-transform lg:hidden',
+          'fixed inset-y-0 left-0 z-50 flex w-[min(19rem,88vw)] flex-col bg-[#173b36] shadow-2xl transition-transform lg:hidden',
           abierto ? 'translate-x-0' : '-translate-x-full',
         )}
         aria-label="Navegación principal"
@@ -64,20 +66,20 @@ export function DashboardShell({ rol, nombre, enlaces, children }: ShellProps) {
 
       {/* Contenido */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
+        <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-[#dfe8e2] bg-white/95 px-4 py-3 backdrop-blur lg:hidden">
           <button
             type="button"
             onClick={() => setAbierto(true)}
-            className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
+            className="rounded-xl border border-[#dfe8e2] p-2 text-slate-700 hover:bg-[#f0f5f2]"
             aria-label="Abrir menú"
           >
             <span className="block h-5 w-5">{Icons.menu}</span>
           </button>
-          <Link href="/dashboard" className="text-base font-bold text-teal-800">
+          <Link href="/dashboard" className="text-base font-bold tracking-tight text-[#176b5b]">
             GeriCare
           </Link>
         </header>
-        <main className="flex-1 p-4 sm:p-6 lg:p-8">{children}</main>
+        <main className="mx-auto w-full max-w-[1680px] flex-1 px-4 py-6 sm:px-7 sm:py-8 lg:px-10 lg:py-9">{children}</main>
       </div>
     </div>
   )
@@ -101,17 +103,17 @@ function Navegacion({ rol, nombre, enlaces, onNavigate }: NavegacionProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 px-5 py-6">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-600 text-lg font-bold text-white">
-          G
+      <div className="flex items-center gap-3 px-5 py-7">
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#d3e9de] text-lg font-extrabold text-[#155c4e] shadow-inner shadow-white/40">
+          G<span className="sr-only">eriCare</span>
         </div>
         <div>
-          <p className="text-sm font-bold tracking-wide text-white">GeriCare</p>
-          <p className="text-xs text-slate-400">Panel clínico</p>
+          <p className="text-[15px] font-bold tracking-tight text-white">GeriCare</p>
+          <p className="mt-0.5 text-[11px] font-medium uppercase tracking-[.14em] text-[#a9c5b9]">Cuidado integral</p>
         </div>
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3" aria-label="Secciones">
+      <nav className="flex-1 space-y-1.5 overflow-y-auto px-3" aria-label="Secciones">
         {enlaces.map((enlace) => (
           <SidebarLink
             key={enlace.href}
@@ -123,9 +125,9 @@ function Navegacion({ rol, nombre, enlaces, onNavigate }: NavegacionProps) {
         ))}
       </nav>
 
-      <div className="border-t border-white/10 px-4 py-4">
+      <div className="border-t border-white/10 bg-black/10 px-4 py-4">
         <div className="mb-3 flex items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-700 text-xs font-bold text-teal-200">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#d3e9de] text-xs font-bold text-[#155c4e] ring-2 ring-white/10">
             {iniciales || 'GC'}
           </div>
           <div className="min-w-0">

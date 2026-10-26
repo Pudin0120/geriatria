@@ -176,8 +176,8 @@ function esPlaceholder(valor: string): boolean {
  */
 export function obtenerConfigSupabase(): ConfigSupabase {
   // ⚠️ Mantener SIEMPRE la forma literal `process.env.NEXT_PUBLIC_*`.
-  const url = limpiar(process.env[NOMBRE_URL])
-  const anonKey = limpiar(process.env[NOMBRE_KEY])
+  const url = limpiar(process.env.NEXT_PUBLIC_SUPABASE_URL)
+  const anonKey = limpiar(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
 
   const faltantes: string[] = []
   if (url.length === 0) faltantes.push(NOMBRE_URL)

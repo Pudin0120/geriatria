@@ -34,21 +34,45 @@ export default async function DashboardPage() {
   const sesion = await obtenerSesionActiva()
   if (!sesion) redirect('/login')
 
+  if (sesion.rol === 'familiar') {
+    return <ResumenFamiliar nombre={sesion.perfil?.full_name ?? 'Familiar'} />
+  }
+
   return (
-    <div className="space-y-6">
-      <header>
+    <div className="space-y-7">
+      <header className="relative overflow-hidden rounded-3xl border border-[#dce9e0] bg-gradient-to-br from-white via-white to-[#e9f3ed] px-5 py-6 sm:px-8 sm:py-8">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-10 -top-24 h-64 w-64 rounded-full border-[34px] border-[#dcebe2]/70" />
+        <div className="relative">
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-[.17em] text-[#548477]">Resumen de la residencia</p>
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">
           Buen día, {sesion.perfil?.full_name.split(' ')[0] ?? 'colega'} 👋
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Resumen operativo de la residencia para hoy.
+        <p className="mt-2 text-sm text-[#71817c]">
+          Una vista clara de la actividad y las prioridades de cuidado.
         </p>
+        </div>
       </header>
 
       {/* Los datos se resuelven en streaming bajo cacheComponents/PPR. */}
       <Suspense fallback={<ContenidoEsqueleto />}>
         <ContenidoDashboard userId={sesion.userId} rol={sesion.rol} />
       </Suspense>
+    </div>
+  )
+}
+
+async function ResumenFamiliar({ nombre }: { nombre: string }) {
+  const supabase = await createClient()
+  const { data, error } = await supabase.rpc('get_linked_resident_summaries')
+  const residentes: Array<{ id: string; first_name: string; last_name: string; room_number: string | null; status: string }> = data ?? []
+  return (
+    <div className="space-y-6">
+      <header className="rounded-3xl border border-[#dce9e0] bg-gradient-to-br from-white to-[#e9f3ed] px-5 py-7 sm:px-8">
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-[.17em] text-[#548477]">GeriCare · Portal familiar</p><h1>Hola, {nombre.split(' ')[0]}</h1><p className="mt-2 text-sm text-[#71817c]">Resumen de la persona residente vinculada a tu cuenta.</p>
+      </header>
+      {error ? <p role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">No se pudo cargar el resumen. Contacta con la administración.</p> : null}
+      {residentes.map((residente) => <Card key={residente.id} className="max-w-2xl"><CardHeader title={`${residente.first_name} ${residente.last_name}`} subtitle={residente.room_number ? `Habitación ${residente.room_number}` : 'Habitación no asignada'} /><CardContent><p className="text-sm text-slate-600">Estado: {residente.status}</p></CardContent></Card>)}
+      {!error && residentes.length === 0 ? <Card className="max-w-2xl border-dashed"><CardContent><p className="text-sm font-medium text-slate-700">No hay un residente vinculado a esta cuenta.</p><p className="mt-1 text-sm text-slate-500">Contacta con la administración para completar la asignación.</p></CardContent></Card> : null}
     </div>
   )
 }

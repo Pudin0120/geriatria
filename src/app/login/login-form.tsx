@@ -10,15 +10,12 @@ const ESTADO_INICIAL: LoginState = { error: null }
 
 /** Formulario de inicio de sesión conectado a la Server Action `login`. */
 export function LoginForm() {
-  const [estado, accion] = useActionState<LoginState, FormData>(login, ESTADO_INICIAL)
-  // El proxy redirige a /login?redirect=/ruta-original al exigir sesión;
-  // propagamos ese destino a la Server Action tras un login exitoso.
   const searchParams = useSearchParams()
-  const redirectParam = searchParams.get('redirect')
+  const [estado, accion] = useActionState<LoginState, FormData>(login, ESTADO_INICIAL)
 
   return (
     <form action={accion} className="space-y-4" noValidate>
-      {redirectParam ? <input type="hidden" name="redirectTo" value={redirectParam} /> : null}
+      <input type="hidden" name="redirectTo" value={searchParams.get('redirect') ?? ''} />
       <Input
         id="email"
         label="Correo electrónico"

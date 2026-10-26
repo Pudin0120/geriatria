@@ -13,7 +13,7 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 /** Etiqueta accesible reutilizable (para campos propios que no usan <Input>). */
 export function Label({ htmlFor, children, className }: { htmlFor?: string; children: ReactNode; className?: string }) {
   return (
-    <label htmlFor={htmlFor} className={cn('block text-sm font-medium text-slate-700', className)}>
+    <label htmlFor={htmlFor} className={cn('block text-sm font-semibold text-[#294640]', className)}>
       {children}
     </label>
   )
@@ -26,7 +26,7 @@ export function Input({ label, id, error, className, ...resto }: InputProps) {
       {label ? (
         <label
           htmlFor={id}
-          className="block text-sm font-medium text-slate-700"
+          className="block text-sm font-semibold text-[#294640]"
         >
           {label}
         </label>
@@ -37,10 +37,10 @@ export function Input({ label, id, error, className, ...resto }: InputProps) {
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? `${id}-error` : undefined}
         className={cn(
-          'block h-10 w-full rounded-lg border bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline focus:outline-2 focus:outline-offset-1 disabled:cursor-not-allowed disabled:bg-slate-50',
+          'block min-h-11 w-full rounded-xl border bg-white px-3.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline focus:outline-2 focus:outline-offset-1 disabled:cursor-not-allowed disabled:bg-slate-50',
           error
             ? 'border-rose-400 focus:outline-rose-500'
-            : 'border-slate-300 focus:outline-teal-600',
+            : 'border-[#d9e4dd] focus:outline-[#176b5b]',
           className,
         )}
         {...resto}
