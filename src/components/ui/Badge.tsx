@@ -59,10 +59,13 @@ export function roleTone(role: UserRole): BadgeTone {
     case 'admin':
       return 'violet'
     case 'nurse_jefe':
+    case 'enfermeria':
       return 'teal'
     case 'medico':
       return 'sky'
     case 'auxiliar':
+      return 'slate'
+    case 'familiar':
       return 'slate'
   }
 }

@@ -43,13 +43,7 @@ export default async function NuevaTareaPage() {
         .eq('status', 'activo')
         .order('first_name', { ascending: true })
         .limit(500),
-      supabase
-        .from('profiles')
-        .select('id, full_name, role, active')
-        .in('role', ['auxiliar', 'nurse_jefe'])
-        .eq('active', true)
-        .order('full_name', { ascending: true })
-        .limit(200),
+      supabase.rpc('list_assignable_staff'),
     ])
 
   const errorConsulta = errResidentes ?? errPerfiles
@@ -82,12 +76,11 @@ export default async function NuevaTareaPage() {
     }
   })
 
-  const auxiliares: AuxiliarOpcion[] = (perfilesRaw ?? []).map((p) => {
-    const fila = p as Pick<ProfileRow, 'id' | 'full_name' | 'role'>
+  const auxiliares: AuxiliarOpcion[] = ((perfilesRaw ?? []) as Array<Pick<ProfileRow, 'id' | 'full_name' | 'role'>>).map((fila) => {
     return {
       id: fila.id,
       nombre: fila.full_name.length > 0 ? fila.full_name : 'Sin nombre',
-      rol: fila.role === 'nurse_jefe' ? 'Enfermera jefe' : 'Auxiliar',
+      rol: fila.role === 'nurse_jefe' ? 'Enfermera jefe' : fila.role === 'enfermeria' ? 'Enfermería' : 'Auxiliar',
     }
   })
 

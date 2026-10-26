@@ -3,9 +3,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 /**
  * Proxy (antes middleware) de GeriCare.
- * Protege todas las rutas bajo /dashboard: si no hay sesión activa con
- * usuario verificado, redirige a /login. También evita que un usuario ya
- * autenticado vuelva a ver /login o la raíz pública.
+ * Protege las rutas bajo /dashboard. La comprobación del perfil activo se
+ * realiza en el layout; permitir /login a una sesión inválida evita bucles.
  */
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -41,17 +40,10 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   const esRutaProtegida = request.nextUrl.pathname.startsWith('/dashboard')
-  const esRutaPublica =
-    request.nextUrl.pathname === '/login' || request.nextUrl.pathname === '/'
-
   if (esRutaProtegida && !user) {
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('redirect', request.nextUrl.pathname)
     return NextResponse.redirect(loginUrl)
-  }
-
-  if (!esRutaProtegida && esRutaPublica && user) {
-    return NextResponse.redirect(new URL('/dashboard', request.url))
   }
 
   return supabaseResponse

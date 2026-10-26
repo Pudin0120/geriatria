@@ -65,7 +65,7 @@ export function ResidentSearch({ residentes }: ResidentSearchProps) {
           onChange={(e: ChangeEvent<HTMLInputElement>) => setTexto(e.target.value)}
           placeholder="Buscar por nombre, apellidos o habitación…"
           aria-label="Buscar residentes"
-          className="block h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline focus:outline-2 focus:outline-offset-1 focus:outline-teal-600"
+          className="block min-h-12 w-full rounded-2xl border border-[#d9e4dd] bg-white pl-10 pr-4 text-sm text-slate-900 shadow-[0_2px_8px_rgba(27,48,46,.025)] placeholder:text-slate-400 focus:outline focus:outline-2 focus:outline-offset-1 focus:outline-[#176b5b]"
         />
       </div>
 
@@ -81,14 +81,14 @@ export function ResidentSearch({ residentes }: ResidentSearchProps) {
               onClick={() => setFiltro(estado)}
               aria-pressed={activo}
               className={cn(
-                'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition-colors',
+                'inline-flex min-h-9 items-center gap-1.5 rounded-full px-3.5 py-1 text-xs font-semibold ring-1 ring-inset transition-colors',
                 activo
-                  ? 'bg-teal-700 text-white ring-teal-700'
-                  : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50',
+                  ? 'bg-[#176b5b] text-white ring-[#176b5b]'
+                  : 'bg-white text-slate-600 ring-[#d9e4dd] hover:bg-[#f3f7f4]',
               )}
             >
               {etiqueta}
-              <span className={cn('tabular-nums', activo ? 'text-teal-100' : 'text-slate-400')}>
+              <span className={cn('rounded-full px-1.5 py-0.5 tabular-nums', activo ? 'bg-white/15 text-white' : 'bg-[#f1f5f2] text-slate-500')}>
                 {contar(estado)}
               </span>
             </button>

@@ -29,15 +29,15 @@ export function SidebarLink({ href, label, icon, onNavigate }: SidebarLinkProps)
       onClick={onNavigate}
       aria-current={activo ? 'page' : undefined}
       className={cn(
-        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+        'flex min-h-11 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
         activo
-          ? 'bg-teal-600/15 text-teal-300'
-          : 'text-slate-300 hover:bg-white/5 hover:text-white',
+          ? 'bg-[#d3e9de] text-[#174b40] shadow-sm'
+          : 'text-[#c1d2ca] hover:bg-white/8 hover:text-white',
       )}
     >
       <span
         aria-hidden="true"
-        className={cn('h-5 w-5 shrink-0', activo ? 'text-teal-400' : 'text-slate-400')}
+        className={cn('h-5 w-5 shrink-0', activo ? 'text-[#176b5b]' : 'text-[#a9c5b9]')}
       >
         {icon}
       </span>

@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { SkeletonTable } from '@/components/ui/Skeleton'
 import { TASK_TYPE_LABELS } from '@/types'
-import type { CarePlanRow, CareTaskRow, ProfileRow } from '@/types'
+import type { CarePlanRow, CareTaskRow } from '@/types'
 import { fechaLocalISO, formatearFecha, horaCorta } from '@/lib/utils'
 
 export const metadata = {
@@ -175,12 +175,8 @@ async function ContenidoPlanes({ id, mostrarTodos }: ContenidoProps) {
   )
   let nombres = new Map<string, string>()
   if (asignados.length > 0) {
-    const { data: perfiles } = await supabase
-      .from('profiles')
-      .select('id, full_name')
-      .in('id', asignados)
-      .returns<Pick<ProfileRow, 'id' | 'full_name'>[]>()
-    nombres = new Map((perfiles ?? []).map((p) => [p.id, p.full_name]))
+    const { data: perfiles } = await supabase.rpc('get_staff_display_names', { target_profile_ids: asignados })
+    nombres = new Map((perfiles ?? []).map((p: { id: string; full_name: string }) => [p.id, p.full_name]))
   }
 
   const hoy = fechaLocalISO()

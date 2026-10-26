@@ -45,7 +45,7 @@ export default async function AdministrarPage({ searchParams }: AdministrarPageP
   const filtros = await searchParams
   const sesion = await obtenerSesionActiva()
   if (!sesion) redirect('/login')
-  if (!['admin', 'nurse_jefe', 'medico', 'auxiliar'].includes(sesion.rol)) {
+  if (!['admin', 'nurse_jefe', 'enfermeria'].includes(sesion.rol)) {
     redirect('/dashboard/tareas')
   }
 

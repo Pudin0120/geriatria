@@ -9,13 +9,13 @@ export type ButtonSize = 'sm' | 'md'
 
 const VARIANTES: Readonly<Record<ButtonVariant, string>> = {
   primary:
-    'bg-teal-700 text-white hover:bg-teal-800 focus-visible:outline-teal-700 disabled:bg-teal-700/50',
+    'bg-[#176b5b] text-white shadow-sm hover:bg-[#104f45] focus-visible:outline-[#176b5b] disabled:bg-[#176b5b]/50',
   secondary:
-    'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus-visible:outline-slate-400 disabled:text-slate-400',
+    'border border-[#d9e4dd] bg-white text-[#294640] shadow-sm hover:bg-[#f4f8f5] focus-visible:outline-[#6a9f8c] disabled:text-slate-400',
   danger:
     'bg-rose-600 text-white hover:bg-rose-700 focus-visible:outline-rose-600 disabled:bg-rose-600/50',
   ghost:
-    'text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-slate-400',
+    'text-slate-600 hover:bg-[#edf3ef] hover:text-slate-900 focus-visible:outline-slate-400',
 }
 
 const TAMANOS: Readonly<Record<ButtonSize, string>> = {
@@ -46,7 +46,7 @@ export function Button({
       type={type}
       disabled={disabled || pending}
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed',
+        'inline-flex min-h-10 items-center justify-center gap-2 rounded-xl font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed',
         VARIANTES[variant],
         TAMANOS[size],
         className,

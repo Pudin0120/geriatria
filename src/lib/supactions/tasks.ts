@@ -12,7 +12,7 @@
  * Reglas arquitectónicas cumplidas:
  *  - Cero lógica de mutación en el cliente: todo pasa por aquí.
  *  - Validación estricta con Zod (`CreateTaskSchema` de `@/types`) antes de insertar.
- *  - Auditoría automática en `access_logs` (fire-and-forget, sin PII clínico).
+ *  - La auditoría de cambios clínicos se realiza en PostgreSQL de forma transaccional.
  *  - Confianza total en RLS: las inserciones se hacen con la sesión del usuario.
  */
 
@@ -27,11 +27,14 @@ import type {
   TablesInsert,
   UserRole,
 } from '@/types'
+import { CreateTaskSchema } from '@/types'
 import {
-  CreateTaskSchema,
-  DIAS_LMV,
+  diasDelPatron,
+  fechasDeLaSerie,
+  hoyLocalIso,
+  sumarDias,
   VENTANA_RECURRENCIA_DIAS,
-} from '@/types'
+} from '@/lib/task-schedule.mjs'
 
 /* ================================================================== */
 /* Constantes locales (un archivo 'use server' solo exporta funciones) */
@@ -41,102 +44,6 @@ const ROLES_ASIGNACION_TAREA: readonly UserRole[] = ['admin', 'nurse_jefe', 'med
 
 const RESULTADO_INICIAL: CreateTaskResult = { exito: false, mensaje: '', instanciasCreadas: 0 }
 
-const ACCION_AUDITORIA = 'task.create_recurrence' as const
-
-/* ================================================================== */
-/* Motor de recurrencia (puro, tipado, testeable)                     */
-/* ================================================================== */
-
-/** Día ISO-8601 (1 = lunes … 7 = domingo) de una fecha local YYYY-MM-DD. */
-function diaIsoDeFecha(fechaIso: string): number {
-  // Mediodía local evita saltos de zona horaria al calcular el día.
-  const d = new Date(`${fechaIso}T12:00:00`)
-  return d.getDay() === 0 ? 7 : d.getDay()
-}
-
-/** Suma `n` días a una fecha YYYY-MM-DD devolviendo YYYY-MM-DD (sin deriva horaria). */
-function sumarDias(fechaIso: string, n: number): string {
-  const [y, m, day] = fechaIso.split('-').map((p) => Number.parseInt(p, 10))
-  const d = new Date(y, m - 1, day)
-  d.setDate(d.getDate() + n)
-  const yy = d.getFullYear()
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  return `${yy}-${mm}-${dd}`
-}
-
-/** Días activos según el patrón elegido (custom usa recurrence_days tal cual). */
-function diasDelPatron(input: CreateTaskInput): number[] {
-  switch (input.recurrence) {
-    case 'none':
-      return [diaIsoDeFecha(input.scheduled_time.slice(0, 10))]
-    case 'daily':
-      return [1, 2, 3, 4, 5, 6, 7]
-    case 'lmi_vie':
-      return [...DIAS_LMV]
-    case 'custom':
-      return [...new Set(input.recurrence_days)].sort((a, b) => a - b)
-  }
-}
-
-/** Fecha local de hoy en formato YYYY-MM-DD (para validar series futuras). */
-function hoyLocalIso(): string {
-  const d = new Date()
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-
-/**
- * Calcula las fechas efectivas de la serie dentro de la ventana de 30 días.
- * - 'none': una única instancia en la fecha indicada.
- * - patrones recurrentes: cada día coincidente desde la fecha inicial hasta
- *   `VENTANA_RECURRENCIA_DIAS` días después (inclusive), sin duplicados.
- */
-function fechasDeLaSerie(input: CreateTaskInput): string[] {
-  const inicio = input.scheduled_time.slice(0, 10)
-  if (input.recurrence === 'none') return [inicio]
-
-  const dias = new Set(diasDelPatron(input))
-  const fechas: string[] = []
-  for (let i = 0; i <= VENTANA_RECURRENCIA_DIAS; i++) {
-    const f = sumarDias(inicio, i)
-    if (dias.has(diaIsoDeFecha(f))) fechas.push(f)
-  }
-  return fechas
-}
-
-/* ================================================================== */
-/* Auditoría interna (fire-and-forget)                                */
-/* ================================================================== */
-
-/**
- * Escribe en `public.access_logs` la creación de una serie de tareas.
- * Respeta la política RLS `access_logs_insert_any_authenticated`: el actor es
- * siempre `auth.uid()` real y no se registra información clínica libre.
- */
-async function registrarAuditoriaTarea(entrada: {
-  entidadId: string
-  detalle: Record<string, string | number>
-}): Promise<void> {
-  try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) return
-    await supabase.from('access_logs').insert({
-      user_id: user.id,
-      action: ACCION_AUDITORIA,
-      entity_type: 'care_task_series',
-      entity_id: entrada.entidadId,
-      metadata: { source: 'server_action', ...entrada.detalle },
-    })
-  } catch {
-    console.error('[GeriCare] No se pudo auditar la creación de serie de tareas.')
-  }
-}
 
 /* ================================================================== */
 /* Acción principal                                                   */
@@ -219,15 +126,13 @@ export async function createTaskWithRecurrence(
   }
 
   if (input.assigned_to !== '') {
-    const { data: auxiliar } = await supabase
-      .from('profiles')
-      .select('id, role')
-      .eq('id', input.assigned_to)
-      .maybeSingle<{ id: string; role: UserRole }>()
+    const { data: personal } = await supabase.rpc('list_assignable_staff')
+    const auxiliar = (personal as Array<{ id: string; role: UserRole }> | null)
+      ?.find((miembro) => miembro.id === input.assigned_to)
     if (!auxiliar) {
       return { ...RESULTADO_INICIAL, mensaje: 'El auxiliar seleccionado no existe en el sistema.' }
     }
-    if (auxiliar.role !== 'auxiliar' && auxiliar.role !== 'nurse_jefe') {
+    if (!['auxiliar', 'nurse_jefe', 'enfermeria'].includes(auxiliar.role)) {
       return {
         ...RESULTADO_INICIAL,
         mensaje: 'Solo auxiliares o la enfermera jefe pueden recibir tareas asignadas.',
@@ -274,17 +179,6 @@ export async function createTaskWithRecurrence(
   if (errorInsercion) {
     return { ...RESULTADO_INICIAL, mensaje: normalizarErrorBdPublic(errorInsercion.message) }
   }
-
-  /* --- Auditoría (nunca rompe el flujo clínico) --------------------------- */
-  void registrarAuditoriaTarea({
-    entidadId: groupId,
-    detalle: {
-      resident_id: input.resident_id,
-      task_type: input.task_type,
-      recurrence: input.recurrence,
-      instancias: filas.length,
-    },
-  })
 
   revalidatePath('/dashboard/tareas')
   revalidatePath(`/dashboard/residentes/${input.resident_id}`, 'page')

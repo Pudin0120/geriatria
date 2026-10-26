@@ -19,6 +19,8 @@ function enlacesPorRol(rol: UserRole): SidebarLinkDef[] {
     { href: '/dashboard/tareas', label: 'Tareas del día', icon: Icons.tasks },
   ]
 
+  if (rol === 'familiar') return [{ href: '/dashboard', label: 'Resumen', icon: Icons.dashboard }]
+
   // «Administración de Medicamentos» (DURO): enfermería, auxiliares y admin.
   const administracionMedicacion: SidebarLinkDef[] = [
     { href: '/dashboard/medicaciones/administrar', label: 'Administrar medicamentos', icon: Icons.medications },
@@ -40,8 +42,10 @@ function enlacesPorRol(rol: UserRole): SidebarLinkDef[] {
     case 'admin':
       return [...comunes, ...administracionMedicacion, ...clinicos, ...administrativos]
     case 'nurse_jefe':
-    case 'medico':
+    case 'enfermeria':
       return [...comunes, ...administracionMedicacion, ...clinicos]
+    case 'medico':
+      return [...comunes, ...clinicos]
     case 'auxiliar':
       return [...comunes, ...administracionMedicacion]
   }
@@ -72,7 +76,7 @@ async function ShellDashboard({ children }: { children: ReactNode }) {
     <DashboardShell rol={sesion.rol} nombre={nombre} enlaces={enlacesPorRol(sesion.rol)}>
       {/* AlertBanner: alertas clínicas del turno (Fase 5), visibles para
           todos los roles y calculadas en servidor al cargar la página. */}
-      <AlertasTurno />
+      {sesion.rol === 'familiar' ? null : <AlertasTurno />}
       {children}
     </DashboardShell>
   )

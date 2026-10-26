@@ -81,8 +81,10 @@ export type {
 export const USER_ROLE_LABELS: Readonly<Record<UserRole, string>> = {
   admin: 'Administración',
   nurse_jefe: 'Enfermero/a jefe',
+  enfermeria: 'Enfermería',
   auxiliar: 'Auxiliar de enfermería',
   medico: 'Médico/a',
+  familiar: 'Familiar',
 }
 
 export const TASK_TYPE_LABELS: Readonly<Record<TaskType, string>> = {
@@ -568,11 +570,8 @@ export const RECURRENCE_PATTERN_LABELS: Readonly<Record<RecurrencePattern, strin
   custom: 'Personalizada (elegir días)',
 }
 
-/** Días del patrón fijo «Lunes · Miércoles · Viernes» (ISO 8601). */
-export const DIAS_LMV: readonly number[] = [1, 3, 5]
-
-/** Ventana de generación física de instancias de recurrencia (días). */
-export const VENTANA_RECURRENCIA_DIAS = 30 as const
+/** Constantes compartidas con el motor puro de fechas de recurrencia. */
+export { DIAS_LMV, VENTANA_RECURRENCIA_DIAS } from '@/lib/task-schedule.mjs'
 
 /**
  * Payload validado que acepta la Server Action `createTaskWithRecurrence`.
