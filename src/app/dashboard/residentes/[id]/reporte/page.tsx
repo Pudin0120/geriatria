@@ -17,7 +17,7 @@ import {
   buildResidentFullName,
 } from '@/types'
 import type { Tone } from '@/lib/reportes'
-import { calcularEdadTexto, formatearFecha } from '@/lib/utils'
+import { calcularEdadTexto, fechaLocalISO, formatearFecha } from '@/lib/utils'
 
 export const metadata = {
   title: 'Reporte clínico individual',
@@ -60,6 +60,11 @@ export default async function ReporteIndividualPage({ params }: ReportePageProps
   await connection()
   const { id } = await params
   if (!esUuid(id)) notFound()
+
+  // Fecha del reporte capturada tras el límite dinámico (connection()): es la
+  // única forma legal de leer `new Date()` en un RSC con cacheComponents sin
+  // provocar el warning «unstable value» durante el prerender.
+  const fechaReporte = fechaLocalISO()
 
   const sesion = await obtenerSesionActiva()
   if (!sesion) redirect('/login')
@@ -444,7 +449,10 @@ export default async function ReporteIndividualPage({ params }: ReportePageProps
       </Card>
 
       <footer className="hidden text-xs text-slate-400 print:block">
-        GeriCare · Reporte generado el {formatearFecha(new Date().toISOString().slice(0, 10))} · {nombreCompleto}
+        {/* `fechaReporte` se calcula en la cabecera de este Server Component,
+            ya tras `await connection()` — leer `new Date()` directamente aquí
+            reactivaría el warning «unstable value» con cacheComponents. */}
+        GeriCare · Reporte generado el {formatearFecha(fechaReporte)} · {nombreCompleto}
       </footer>
     </div>
   )
