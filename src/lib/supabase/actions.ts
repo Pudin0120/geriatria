@@ -34,7 +34,6 @@ import type {
   ClinicalFormState,
   LoginState,
   ResidentFormState,
-  SignupState,
   VgiFormState,
 } from '@/lib/estados-form'
 import { RANGOS_VGI, type CampoVgi } from '@/lib/vgi-rangos'
@@ -43,7 +42,6 @@ export type {
   ClinicalFormState,
   LoginState,
   ResidentFormState,
-  SignupState,
   VgiFormState,
 } from '@/lib/estados-form'
 
@@ -95,7 +93,6 @@ async function registrarAuditoria(entrada: {
 const AUDITORIA_ACCIONES = {
   LOGIN: 'auth.login',
   LOGOUT: 'auth.logout',
-  SIGNUP: 'auth.signup',
   RESIDENT_CREATE: 'resident.create',
   RESIDENT_UPDATE: 'resident.update',
   VGI_CREATE: 'vgi.create',
@@ -116,8 +113,6 @@ const CREDENCIALES_INCORRECTAS =
   'Credenciales incorrectas. Verifica tu correo y contraseña.'
 const ERROR_INTERNO =
   'Ocurrió un problema al comunicarse con el servidor. Inténtalo de nuevo.'
-const USUARIO_EXISTE =
-  'Ya existe una cuenta registrada con ese correo electrónico.'
 
 /**
  * Diagnóstico temprano: si faltan o están mal formadas las variables de
@@ -157,9 +152,6 @@ function mensajeErrorAuth(descripcion: string): string {
   if (texto.includes('invalid login credentials')) return CREDENCIALES_INCORRECTAS
   if (texto.includes('email not confirmed')) {
     return 'Tu correo aún no está confirmado. Revisa tu bandeja de entrada.'
-  }
-  if (texto.includes('already registered') || texto.includes('already exists')) {
-    return USUARIO_EXISTE
   }
   if (texto.includes('rate limit') || texto.includes('too many requests')) {
     return 'Demasiados intentos. Espera unos minutos antes de reintentar.'
@@ -234,59 +226,6 @@ export async function logout(): Promise<void> {
   await supabase.auth.signOut()
   revalidatePath('/', 'layout')
   redirect('/login')
-}
-
-/**
- * Registra una nueva cuenta de personal. El trigger `handle_new_user`
- * crea automáticamente su perfil con rol 'auxiliar' (el más bajo).
- * Tras registrarse inicia sesión y redirige al dashboard.
- */
-export async function signup(
-  _estadoPrevio: SignupState,
-  formData: FormData,
-): Promise<SignupState> {
-  const nombre = leerCampo(formData, 'full_name')
-  const email = leerCampo(formData, 'email')
-  const password = leerCampo(formData, 'password')
-
-  if (nombre.length < 3) {
-    return { error: 'Escribe tu nombre completo (mínimo 3 caracteres).', exito: false }
-  }
-  if (email.length === 0 || !email.includes('@')) {
-    return { error: EMAIL_INVALIDO, exito: false }
-  }
-  if (password.length < 8) {
-    return { error: PASSWORD_CORTA, exito: false }
-  }
-
-  const problemaConfig = validarConfiguracionSupabase()
-  if (problemaConfig) {
-    return { error: problemaConfig, exito: false }
-  }
-
-  const supabase = await createClient()
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: { data: { full_name: nombre } },
-  })
-
-  if (error) {
-    return { error: mensajeErrorAuth(error.message), exito: false }
-  }
-
-  void registrarAuditoria({ accion: AUDITORIA_ACCIONES.SIGNUP, entidadTipo: 'auth', entidadId: data.user?.id })
-
-  // Si Supabase no devolvió sesión (correo sin confirmar), informamos al usuario.
-  if (!data.session) {
-    return {
-      error: null,
-      exito: true,
-    }
-  }
-
-  revalidatePath('/', 'layout')
-  redirect('/dashboard')
 }
 
 /* ================================================================== */

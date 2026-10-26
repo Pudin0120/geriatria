@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { connection } from 'next/server'
 import type { ReactNode } from 'react'
 import { Suspense } from 'react'
 import { obtenerSesionActiva } from '@/lib/supabase/session'
@@ -65,6 +66,10 @@ export default async function DashboardLayout({
 
 /** Envoltorio con sidebar que lee la sesión (cookies + BD) en runtime. */
 async function ShellDashboard({ children }: { children: ReactNode }) {
+  // Marca el límite dinámico ANTES de consumir cualquier valor inestable
+  // (new Date()/Date.now() via getClinicalAlerts y las páginas hijas).
+  // Con cacheComponents/PPR esto evita el error "unstable value" al prerender.
+  await connection()
   const sesion = await obtenerSesionActiva()
   if (!sesion) redirect('/login')
 
@@ -82,6 +87,9 @@ async function ShellDashboard({ children }: { children: ReactNode }) {
 
 /** Envoltorio de servidor para las alertas: se resuelve con streaming bajo Suspense. */
 async function AlertasTurno() {
+  // Doble garantía: esta frontera puede renderizarse durante el prerender del
+  // shell; connection() fuerza runtime antes de leer la hora (Date.now()).
+  await connection()
   let resumen: AlertSummary | null = null
   try {
     resumen = await getClinicalAlerts()
