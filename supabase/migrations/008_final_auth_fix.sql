@@ -190,40 +190,80 @@ where email in (
 );
 
 -- ----------------------------------------------------------------------------
--- BLOQUE 7 · PURGA DE FILAS FANTASMA (diagnosticado en producción, oct-2026).
--- Evidencia forense: las semillas @gericare.test NO aparecen en la lista del
--- Admin API de GoTrue (auth.users "visible"), pero INSERT con ese email falla
--- con 23505 users_email_partial_key -> existen filas huérfanas/deleted_at en
--- auth.users que bloquean la recreación limpia. Este bloque purga TODOS los
--- restos (users + identities + mfa + sesiones) para que puedas volver a crear
--- las 4 cuentas desde cero vía Dashboard > Authentication > Add user, o vía
--- SQL Editor con la sentencia final comentada más abajo.
+-- BLOQUE 7 · PURGA QUIRÚRGICA DE FILAS FANTASMA (diagnosticado en producción,
+-- oct-2026) — SOLO para UUIDs NO-semilla que secuestren los emails semilla.
+-- Evidencia forense: existían filas huérfanas / soft-deleted (deleted_at) en
+-- auth.users cuyo email coincidía con una semilla; bloqueaban la recreación
+-- limpia con 23505 (users_email_partial_key) y confundían a GoTrue al resolver
+-- signInWithPassword. La versión anterior de esta migración purgaba TODAS las
+-- filas *@gericare.test (incluidas las semillas canónicas) y luego las
+-- recreaba; eso invalidaba sesiones activas y era innecesario ahora que los
+-- bloques 1-6 ya reparan in-situ las semillas existentes. Aquí solo se elimina
+-- el residuo que ocupa un email semilla desde un id DISTINTO de los cuatro
+-- UUIDs canónicos; las cuentas legítimas se preservan intactas.
 -- ----------------------------------------------------------------------------
 delete from auth.mfa_challenges
     where factor_id in (select f.id from auth.mfa_factors f
                         where f.user_id in (select id from auth.users
-                                            where email like '%@gericare.test'));
+                                            where email like '%@gericare.test'
+                                              and id not in (
+                                                '00000000-0000-4000-8000-000000000001',
+                                                '00000000-0000-4000-8000-000000000002',
+                                                '00000000-0000-4000-8000-000000000003',
+                                                '00000000-0000-4000-8000-000000000004')));
 delete from auth.mfa_factors
     where user_id in (select id from auth.users
-                      where email like '%@gericare.test');
+                      where email like '%@gericare.test'
+                        and id not in (
+                          '00000000-0000-4000-8000-000000000001',
+                          '00000000-0000-4000-8000-000000000002',
+                          '00000000-0000-4000-8000-000000000003',
+                          '00000000-0000-4000-8000-000000000004'));
 delete from auth.refresh_tokens
     where user_id::text in (select id::text from auth.users
-                      where email like '%@gericare.test');
+                      where email like '%@gericare.test'
+                        and id not in (
+                          '00000000-0000-4000-8000-000000000001',
+                          '00000000-0000-4000-8000-000000000002',
+                          '00000000-0000-4000-8000-000000000003',
+                          '00000000-0000-4000-8000-000000000004'));
 delete from auth.sessions
     where user_id in (select id from auth.users
-                      where email like '%@gericare.test');
+                      where email like '%@gericare.test'
+                        and id not in (
+                          '00000000-0000-4000-8000-000000000001',
+                          '00000000-0000-4000-8000-000000000002',
+                          '00000000-0000-4000-8000-000000000003',
+                          '00000000-0000-4000-8000-000000000004'));
 delete from auth.identities
-    where provider_id::text like '%@gericare.test'
-       or user_id in (select id from auth.users
-                      where email like '%@gericare.test');
+    where (provider_id::text like '%@gericare.test'
+           or user_id in (select id from auth.users
+                          where email like '%@gericare.test'))
+      and user_id not in (
+        '00000000-0000-4000-8000-000000000001',
+        '00000000-0000-4000-8000-000000000002',
+        '00000000-0000-4000-8000-000000000003',
+        '00000000-0000-4000-8000-000000000004');
 delete from public.profiles
-    where email like '%@gericare.test';
+    where email like '%@gericare.test'
+      and id not in (
+        '00000000-0000-4000-8000-000000000001',
+        '00000000-0000-4000-8000-000000000002',
+        '00000000-0000-4000-8000-000000000003',
+        '00000000-0000-4000-8000-000000000004');
 delete from auth.users
-    where email like '%@gericare.test';
+    where email like '%@gericare.test'
+      and id not in (
+        '00000000-0000-4000-8000-000000000001',
+        '00000000-0000-4000-8000-000000000002',
+        '00000000-0000-4000-8000-000000000003',
+        '00000000-0000-4000-8000-000000000004');
 
 -- ----------------------------------------------------------------------------
--- BLOQUE 8 · RECREACIÓN AUTOMÁTICA DE LAS 4 SEMILLAS (vía SQL, sin Dashboard).
--- Se ejecuta INMEDIATAMENTE después de la purga del BLOQUE 7, replicando el
+-- BLOQUE 8 · CREACIÓN RESIDUAL DE LAS 4 SEMILLAS (vía SQL, sin Dashboard).
+-- Solo actúa como red de seguridad: si tras los bloques 1-7 alguna semilla
+-- canónica STILL no existe (p. ej. proyecto recién inicializado donde la 001
+-- no llegó a aplicarse), la crea replicando el
 -- patrón exacto que usa GoTrue al crear usuarios por email/password:
 --   * auth.users con encrypted_password = bcrypt('GeriCare#Seed2026')
 --   * email_confirmed_at = now() (compatible con "Confirm email" ACTIVO)
