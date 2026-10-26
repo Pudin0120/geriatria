@@ -7,7 +7,7 @@ Estado de esta revisión: 2026-10-26. Este procedimiento no aplica migraciones n
 - Rama de cierre local: `release/gericare-final-20261026`, con el trabajo local preservado e `origin/main` integrado. La rama original `dev` se conserva sin reescribir.
 - `origin/dev` y `origin/main` conservan historiales de commit distintos, pero el diff de sus árboles de archivos está vacío. La migración 008 sigue siendo sensible porque puede restablecer credenciales demo.
 - La rama contiene 001–010; 005–008 vienen de la historia remota integrada y 009–010 forman parte del cambio de cierre. El manifiesto registra sus hashes.
-- Se creó una copia local fuera de Git en `/home/joseff/geriatria-backups/GeriCare-pre-release-20261026.tar.gz` y el bundle de recuperación verificable `/home/joseff/geriatria-backups/geriatria-release-final.bundle`.
+- Se creó una copia local fuera de Git en `/home/joseff/geriatria-backups/GeriCare-pre-release-20261026.tar.gz` y el bundle de recuperación verificable `/home/joseff/geriatria-backups/geriatria-release-final-20261026.bundle`.
 - GitHub reconoce la sesión para el repositorio público. El despliegue del frontend no está configurado en este checkout: no hay CLI de Vercel ni workflow de publicación.
 - El CLI enumera el proyecto autorizado, pero la consulta de migraciones no terminó ni devolvió historial. No hay evidencia actual de qué migraciones están aplicadas ni de una restauración verificada.
 - No se detectaron Docker, Podman ni `psql`. Las pruebas locales usan PGlite 0.5.12 (PostgreSQL WASM 18.6) y un stub de Auth. No son staging ni sustituyen al PostgreSQL 17 / Auth administrado de Supabase.
