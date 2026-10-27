@@ -338,7 +338,7 @@ grant execute on function public.record_task_execution(uuid, public.task_status,
 -- Reset the whole schema ACL, then expose only the RPCs used by the app.
 revoke execute on all functions in schema public from public, anon, authenticated;
 -- UUID defaults are evaluated by authenticated INSERT statements on rows.
-grant execute on function public.uuid_generate_v4() to public;
+grant execute on function extensions.uuid_generate_v4() to public;
 grant execute on function public.current_user_role(), public.is_admin(), public.is_nurse_or_above(),
   public.has_active_profile(), public.can_access_resident(uuid), public.get_linked_resident_summaries(),
   public.list_assignable_staff(), public.is_assignable_staff(uuid), public.get_staff_display_names(uuid[]),
