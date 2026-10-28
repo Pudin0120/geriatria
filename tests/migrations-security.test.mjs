@@ -29,10 +29,12 @@ const medication = '40000000-0000-4000-8000-000000000001'
 
 before(async () => {
   await db.exec('create extension pgcrypto')
+  await db.exec('set search_path to public, extensions')
   await db.exec(`
     create role anon;
     create role authenticated;
     create role service_role;
+    create schema extensions;
     create schema auth;
     create table auth.users (
       id uuid primary key,
@@ -72,7 +74,7 @@ before(async () => {
     create function auth.uid() returns uuid language sql stable as $$
       select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
     $$;
-    create function public.uuid_generate_v4() returns uuid language sql volatile as $$
+    create function extensions.uuid_generate_v4() returns uuid language sql volatile as $$
       select gen_random_uuid()
     $$;
   `)
@@ -228,7 +230,7 @@ test('los grants de funciones quedan en lista permitida tras los grants históri
     select has_function_privilege('authenticated', 'public.update_updated_at_column()', 'EXECUTE') as trigger_function,
            has_function_privilege('authenticated', 'public.record_task_execution(uuid,public.task_status,text,jsonb)', 'EXECUTE') as task_rpc,
            has_function_privilege('anon', 'public.record_task_execution(uuid,public.task_status,text,jsonb)', 'EXECUTE') as anon_task_rpc,
-           has_function_privilege('authenticated', 'public.uuid_generate_v4()', 'EXECUTE') as uuid_default
+           has_function_privilege('authenticated', 'extensions.uuid_generate_v4()', 'EXECUTE') as uuid_default
   `)
   assert.equal(acl.rows[0].trigger_function, false)
   assert.equal(acl.rows[0].task_rpc, true)
